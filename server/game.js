@@ -115,7 +115,13 @@ class Game {
       this.boards.push(await buildBoard(i));
     }
     this.phase = PHASE.BOARD;
-    this.broadcast('game_started', this.getState());
+    const st = this.getState();
+    this.broadcast('game_started', st);
+    this.broadcast('state', st); // belt-and-suspenders for late mounters
+  }
+
+  sendStateTo(socketId) {
+    this.io.to(socketId).emit('state', this.getState());
   }
 
   hostSkipQuestion(socketId) {

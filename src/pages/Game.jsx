@@ -41,6 +41,10 @@ export default function Game() {
     window.__ibSocket = socket;
     const mySid = socket.id;
 
+    // Ask server for current state in case we mounted after game_started fired
+    socket.emit('request_state');
+
+    socket.on('game_started', s => setState(s));
     socket.on('state', s => setState(s));
     socket.on('media_phase', m => { setPhase('media'); setMedia(m); setQuestion(null); setMyAnswer(null); setLocked([]); });
     socket.on('question_started', q => {

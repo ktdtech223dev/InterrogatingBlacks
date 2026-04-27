@@ -190,6 +190,7 @@ io.on('connection', socket => {
   });
 
   socket.on('ready', () => games[socket.room]?.toggleReady(socket.id));
+  socket.on('request_state', () => games[socket.room]?.sendStateTo(socket.id));
   socket.on('start', ({ boardCount }) => games[socket.room]?.start(boardCount || 3, socket.id));
   socket.on('select_q', ({ catIdx, qIdx }) => games[socket.room]?.selectQuestion(socket.id, catIdx, qIdx));
   socket.on('answer', ({ answer }) => games[socket.room]?.submitAnswer(socket.id, answer));

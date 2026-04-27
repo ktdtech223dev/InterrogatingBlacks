@@ -1,6 +1,6 @@
 {
   "name": "interrogating-blacks",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Multiplayer trivia game for the N Games launcher",
   "private": true,
   "main": "electron/main.js",
