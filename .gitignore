@@ -1,0 +1,10 @@
+node_modules/
+dist/
+*.db
+public/uploads/
+release/uploads/
+release/interrogating.db
+release/InterrogatingBlacks.exe
+release/better_sqlite3.node
+release/*.zip
+.DS_Store

@@ -1,0 +1,169 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #08080f;
+  --bg2: #111120;
+  --bg3: #1a1a2e;
+  --bg4: #21212e;
+  --gold: #FFD700;
+  --gold2: #FFA500;
+  --correct: #00FF88;
+  --wrong: #FF3355;
+  --accent: #6366f1;
+  --text: #ffffff;
+  --muted: #888899;
+  --keshawn: #FF69B4;
+  --sean: #2E8B57;
+  --amari: #FFD700;
+  --dart: #722F37;
+  --tyheim: #FF6B35;
+  --arisa: #9B59B6;
+}
+
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Outfit', sans-serif;
+  overflow-x: hidden;
+  position: relative;
+}
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg, rgba(255,255,255,0.02) 0,
+    rgba(255,255,255,0.02) 1px,
+    transparent 1px, transparent 4px
+  );
+  pointer-events: none;
+  z-index: 9999;
+}
+
+.font-bebas { font-family: 'Bebas Neue', sans-serif; letter-spacing: 0.05em; }
+.font-outfit { font-family: 'Outfit', sans-serif; }
+
+.rarity-common { color: #94a3b8; border-color: #94a3b8; }
+.rarity-rare { color: #3b82f6; border-color: #3b82f6; }
+.rarity-epic { color: #a855f7; border-color: #a855f7; }
+.rarity-legendary {
+  color: #f59e0b; border-color: #f59e0b;
+  animation: shimmer 3s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  0%,100% { box-shadow: 0 0 5px #f59e0b; }
+  50% { box-shadow: 0 0 25px #f59e0b, 0 0 40px #fbbf24; }
+}
+
+@keyframes rainbow {
+  0% { background: #ff0000; }
+  16% { background: #ffa500; }
+  33% { background: #ffff00; }
+  50% { background: #00ff00; }
+  66% { background: #0000ff; }
+  83% { background: #4b0082; }
+  100% { background: #ff0000; }
+}
+
+@keyframes pop {
+  0% { transform: scale(0); opacity: 0; }
+  60% { transform: scale(1.15); }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+@keyframes flip {
+  0% { transform: rotateY(0); }
+  50% { transform: rotateY(90deg); }
+  100% { transform: rotateY(0); }
+}
+
+@keyframes pulse-strong {
+  0%,100% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+}
+
+.pop-in { animation: pop 0.4s ease-out; }
+.flip-card { animation: flip 0.6s ease-in-out; }
+.pulse-strong { animation: pulse-strong 1s infinite; }
+
+.scrollbar-hide::-webkit-scrollbar { display: none; }
+.scrollbar-hide { scrollbar-width: none; }
+
+.btn {
+  padding: 0.75rem 1.5rem;
+  border-radius: 0.5rem;
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 1.25rem;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  transition: transform 0.1s, box-shadow 0.1s;
+  border: 2px solid transparent;
+  background: var(--bg3);
+  color: white;
+}
+.btn:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.4); }
+.btn:active { transform: translateY(0); }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.btn-primary { background: linear-gradient(135deg, var(--gold), var(--gold2)); color: black; }
+.btn-correct { background: var(--correct); color: black; }
+.btn-wrong { background: var(--wrong); color: white; }
+.btn-danger { background: #dc2626; color: white; }
+
+.cell {
+  background: linear-gradient(135deg, var(--bg3), var(--bg2));
+  border: 1px solid rgba(255,255,255,0.1);
+  cursor: pointer;
+  transition: all 0.2s;
+  position: relative;
+}
+.cell:hover:not(.answered) {
+  background: var(--gold);
+  color: black;
+  transform: scale(1.03);
+  z-index: 5;
+}
+.cell.answered {
+  background: var(--bg);
+  color: #444;
+  cursor: default;
+}
+
+.input {
+  background: var(--bg2);
+  border: 1px solid rgba(255,255,255,0.1);
+  color: white;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.375rem;
+  width: 100%;
+}
+.input:focus { outline: none; border-color: var(--gold); }
+
+.glow-correct { box-shadow: 0 0 20px var(--correct); }
+.glow-wrong { box-shadow: 0 0 20px var(--wrong); }
+.glow-gold { box-shadow: 0 0 20px var(--gold); }
+
+.toast {
+  position: fixed;
+  top: 2rem;
+  right: 2rem;
+  z-index: 10000;
+  padding: 1rem 1.5rem;
+  background: var(--bg3);
+  border-left: 4px solid var(--gold);
+  border-radius: 0.5rem;
+  animation: slideIn 0.3s ease-out;
+  max-width: 400px;
+}
+
+@keyframes slideIn {
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
