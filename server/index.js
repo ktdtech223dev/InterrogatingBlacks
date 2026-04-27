@@ -1,8 +1,29 @@
+const path = require('path');
+const fs = require('fs');
+
+// ── Crash-to-file so users can see what happened when double-clicked ──
+const _baseDirEarly = process.pkg ? path.dirname(process.execPath) : path.join(__dirname, '..');
+const _logFile = path.join(_baseDirEarly, 'interrogating-blacks.log');
+function _log(msg) {
+  const line = `[${new Date().toISOString()}] ${msg}\n`;
+  try { fs.appendFileSync(_logFile, line); } catch {}
+  try { console.log(msg); } catch {}
+}
+process.on('uncaughtException', (err) => {
+  _log('UNCAUGHT: ' + (err?.stack || err));
+  setTimeout(() => process.exit(1), 100);
+});
+process.on('unhandledRejection', (err) => {
+  _log('UNHANDLED REJECTION: ' + (err?.stack || err));
+});
+_log('=== Interrogating Blacks starting ===');
+_log('execPath: ' + process.execPath);
+_log('cwd: ' + process.cwd());
+_log('node: ' + process.version);
+
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
-const path = require('path');
-const fs = require('fs');
 const multer = require('multer');
 const cron = require('node-cron');
 const { Game } = require('./game');
@@ -10,6 +31,7 @@ const { SoloRun } = require('./solo');
 const { db } = require('./database');
 const { getPlayerAchievements, getPlayerStats, getSeasonStandings } = require('./achievements');
 const { runScrape } = require('./scraper');
+_log('Modules loaded.');
 
 const app = express();
 const server = http.createServer(app);
@@ -189,4 +211,14 @@ if (initialCount < 100) {
 }
 
 const PORT = process.env.PORT || 3847;
-server.listen(PORT, '0.0.0.0', () => console.log(`🎯 Interrogating Blacks :${PORT} (data: ${dataDir})`));
+server.listen(PORT, '0.0.0.0', () => {
+  _log(`🎯 Interrogating Blacks :${PORT} (data: ${dataDir})`);
+  _log(`Open http://localhost:${PORT} in your browser`);
+  if (process.pkg && !process.env.PORT) {
+    // Auto-open browser when run from exe
+    const url = `http://localhost:${PORT}`;
+    const { exec } = require('child_process');
+    exec(`start "" "${url}"`, () => {});
+  }
+});
+server.on('error', (err) => _log('SERVER ERROR: ' + (err?.stack || err)));
