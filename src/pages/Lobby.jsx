@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { io } from 'socket.io-client';
@@ -13,30 +13,63 @@ export default function Lobby() {
   const [state, setState] = useState({ players: [], hostId: null, spectators: 0 });
   const [boardCount, setBoardCount] = useState(3);
   const [blockedReason, setBlockedReason] = useState('');
+  const [connected, setConnected] = useState(false);
+  const [lastUpdate, setLastUpdate] = useState(null);
+  const myPlayerIdRef = useRef(null);
 
   useEffect(() => {
     axios.get('/api/players').then(r => setPlayers(r.data));
-    if (!socket) socket = io();
-    socket.on('state', (s) => setState(s));
-    socket.on('returned_to_lobby', (s) => setState(s));
+
+    // Always create a fresh connection for a clean lobby join
+    if (socket?.connected) socket.disconnect();
+    socket = io({ reconnection: true, reconnectionAttempts: Infinity });
+    window.__ibSocket = socket;
+
+    const stored = sessionStorage.getItem('myPlayerId');
+    if (stored) myPlayerIdRef.current = +stored;
+
+    const rejoin = () => {
+      if (myPlayerIdRef.current) {
+        socket.emit('join', { playerId: myPlayerIdRef.current, room: 'ngames' });
+      }
+    };
+
+    socket.on('connect', () => {
+      setConnected(true);
+      // If we had previously joined as a player, re-join after (re)connect
+      rejoin();
+    });
+    socket.on('disconnect', () => setConnected(false));
+    socket.on('connect_error', () => setConnected(false));
+
+    socket.on('state', (s) => {
+      setState({ ...s });
+      setLastUpdate(new Date().toLocaleTimeString());
+    });
+    socket.on('returned_to_lobby', (s) => setState({ ...s }));
     socket.on('start_blocked', ({ reason }) => {
       setBlockedReason(reason);
       setTimeout(() => setBlockedReason(''), 3000);
     });
     socket.on('game_started', () => navigate('/game'));
+
     return () => {
       socket?.off('state');
       socket?.off('returned_to_lobby');
       socket?.off('start_blocked');
       socket?.off('game_started');
+      socket?.off('connect');
+      socket?.off('disconnect');
+      socket?.off('connect_error');
     };
-  }, []);
+  }, [navigate]);
 
   const join = (playerId) => {
     setSelectedId(playerId);
+    myPlayerIdRef.current = playerId;
+    sessionStorage.setItem('myPlayerId', playerId);
     socket.emit('join', { playerId, room: 'ngames' });
     setJoined(true);
-    sessionStorage.setItem('myPlayerId', playerId);
   };
 
   const toggleReady = () => socket.emit('ready');
@@ -57,7 +90,30 @@ export default function Lobby() {
     <div className="min-h-screen p-6">
       <div className="flex justify-between items-center mb-6">
         <h1 className="font-bebas text-5xl text-yellow-400">LOBBY</h1>
-        <div className="text-gray-400">Room: <span className="font-bebas text-white">NGAMES</span></div>
+        <div className="flex items-center gap-3 text-xs">
+          <span className={`inline-block w-2 h-2 rounded-full ${connected ? 'bg-green-400' : 'bg-red-400'}`} />
+          <span className="text-gray-400">{connected ? 'connected' : 'disconnected'}</span>
+          {lastUpdate && <span className="text-gray-500">· last sync {lastUpdate}</span>}
+          <span className="text-gray-400 ml-2">Room: <span className="font-bebas text-white">NGAMES</span></span>
+        </div>
+      </div>
+
+      <div className="bg-gray-900 p-3 rounded-lg mb-4">
+        <div className="font-bebas text-xl text-yellow-400">PLAYERS IN ROOM ({playerCount})</div>
+        {playerCount === 0 ? (
+          <div className="text-gray-500 text-sm mt-1">Pick a crew member to join.</div>
+        ) : (
+          <div className="flex flex-wrap gap-2 mt-2">
+            {state.players.map(p => (
+              <div key={p.id} className="flex items-center gap-2 px-3 py-1 rounded-full"
+                style={{ background: p.color, color: 'white' }}>
+                <span className="font-bebas">{p.name}</span>
+                {p.ready ? <span title="Ready">✅</span> : <span title="Not ready">⏳</span>}
+                {p.id === state.hostId && <span title="Host">👑</span>}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <h2 className="font-bebas text-2xl mb-3">PICK YOUR CREW MEMBER</h2>
@@ -150,7 +206,7 @@ export default function Lobby() {
         </button>
       ) : joined ? (
         <div className="text-center text-gray-400 font-bebas text-xl py-4">
-          Waiting for host to start...
+          Waiting for host to start... ({readyCount}/{playerCount} ready)
         </div>
       ) : (
         <div className="text-center text-gray-500 py-4">Pick a crew member to join.</div>

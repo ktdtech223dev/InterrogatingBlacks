@@ -36,7 +36,9 @@ export default function Game() {
   const myPlayerId = +sessionStorage.getItem('myPlayerId');
 
   useEffect(() => {
-    if (!socket) socket = io();
+    // Reuse the lobby's connected socket if it exists, otherwise make a fresh one
+    socket = window.__ibSocket && window.__ibSocket.connected ? window.__ibSocket : (socket || io());
+    window.__ibSocket = socket;
     const mySid = socket.id;
 
     socket.on('state', s => setState(s));
