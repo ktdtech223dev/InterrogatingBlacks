@@ -89,13 +89,15 @@ db.exec(`
     difficulty TEXT NOT NULL,
     question TEXT NOT NULL,
     correct_answer TEXT NOT NULL,
-    wrong_1 TEXT NOT NULL,
-    wrong_2 TEXT NOT NULL,
-    wrong_3 TEXT NOT NULL,
+    wrong_1 TEXT NOT NULL DEFAULT '',
+    wrong_2 TEXT NOT NULL DEFAULT '',
+    wrong_3 TEXT NOT NULL DEFAULT '',
     point_value INTEGER NOT NULL,
     media_url TEXT,
     media_type TEXT,
     media_duration_sec INTEGER DEFAULT 5,
+    answer_type TEXT DEFAULT 'multiple_choice',
+    accepted_answers TEXT,
     added_by INTEGER REFERENCES players(id),
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
@@ -111,6 +113,8 @@ db.exec(`
     played_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
+  -- Idempotent migrations for existing DBs (sqlite ignores duplicate-column errors via try/catch in JS below)
+
   CREATE TABLE IF NOT EXISTS cosmetics (
     id TEXT PRIMARY KEY,
     type TEXT NOT NULL,
@@ -119,6 +123,11 @@ db.exec(`
     unlock_requirement TEXT NOT NULL
   );
 `);
+
+// Idempotent ALTER TABLE migrations for older DBs
+['answer_type TEXT DEFAULT \'multiple_choice\'', 'accepted_answers TEXT'].forEach(col => {
+  try { db.exec(`ALTER TABLE custom_questions ADD COLUMN ${col}`); } catch {}
+});
 
 function seedPlayers() {
   const count = db.prepare('SELECT COUNT(*) as c FROM players').get().c;
@@ -266,9 +275,156 @@ function seedCustomQuestions() {
   questions.forEach(q => ins.run(...q));
 }
 
+function seedMediaQuestions() {
+  const exists = db.prepare(`SELECT COUNT(*) as c FROM custom_questions WHERE media_url IS NOT NULL AND media_url != ''`).get().c;
+  if (exists > 0) return;
+  const ins = db.prepare(`
+    INSERT INTO custom_questions
+      (category, difficulty, question, correct_answer, wrong_1, wrong_2, wrong_3, point_value, media_url, media_type, media_duration_sec, answer_type)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  // Wikimedia Commons URLs are stable and free to use
+  const W = (file) => `https://upload.wikimedia.org/wikipedia/commons/thumb/${file}/640px-${file.split('/').pop()}`;
+
+  const mediaQs = [
+    ['Pop Culture', 'easy', 'Who is this?', 'Beyoncé', 'Rihanna', 'Cardi B', 'Nicki Minaj', 200,
+     'https://upload.wikimedia.org/wikipedia/commons/thumb/8/89/Beyonce_-_The_Formation_World_Tour%2C_at_Stade_de_France.jpg/480px-Beyonce_-_The_Formation_World_Tour%2C_at_Stade_de_France.jpg', 'image', 5, 'multiple_choice'],
+    ['Pop Culture', 'easy', 'Who is this?', 'Drake', 'The Weeknd', 'Travis Scott', 'Future', 200,
+     'https://upload.wikimedia.org/wikipedia/commons/thumb/8/86/Drake_July_2016.jpg/480px-Drake_July_2016.jpg', 'image', 5, 'multiple_choice'],
+    ['Hip Hop', 'medium', 'Who is this rapper?', 'Kendrick Lamar', 'J. Cole', 'Big Sean', 'Vince Staples', 400,
+     'https://upload.wikimedia.org/wikipedia/commons/thumb/6/6f/Kendrick_Lamar_2017.jpg/480px-Kendrick_Lamar_2017.jpg', 'image', 5, 'multiple_choice'],
+    ['Hip Hop', 'medium', 'Who is this?', 'Kanye West', 'Jay-Z', 'Pharrell Williams', 'Nas', 400,
+     'https://upload.wikimedia.org/wikipedia/commons/thumb/2/22/Kanye_West_at_the_2009_Tribeca_Film_Festival_%28cropped%29.jpg/480px-Kanye_West_at_the_2009_Tribeca_Film_Festival_%28cropped%29.jpg', 'image', 5, 'multiple_choice'],
+    ['Sports', 'easy', 'What basketball player is shown?', 'LeBron James', 'Kevin Durant', 'Stephen Curry', 'Giannis Antetokounmpo', 200,
+     'https://upload.wikimedia.org/wikipedia/commons/thumb/d/dd/LeBron_James_%2851959977144%29_%28cropped2%29.jpg/480px-LeBron_James_%2851959977144%29_%28cropped2%29.jpg', 'image', 5, 'multiple_choice'],
+    ['Sports', 'medium', 'Who is this?', 'Michael Jordan', 'Kobe Bryant', 'Magic Johnson', 'Larry Bird', 400,
+     'https://upload.wikimedia.org/wikipedia/commons/thumb/d/d6/Michael_Jordan_in_2014.jpg/480px-Michael_Jordan_in_2014.jpg', 'image', 5, 'multiple_choice'],
+    ['Sports', 'medium', 'Who is this NFL legend?', 'Tom Brady', 'Peyton Manning', 'Aaron Rodgers', 'Patrick Mahomes', 400,
+     'https://upload.wikimedia.org/wikipedia/commons/thumb/7/76/Tom_Brady_2019.jpg/480px-Tom_Brady_2019.jpg', 'image', 5, 'multiple_choice'],
+    ['History', 'easy', 'What landmark is this?', 'Eiffel Tower', 'Empire State Building', 'Big Ben', 'CN Tower', 200,
+     'https://upload.wikimedia.org/wikipedia/commons/thumb/a/a8/Tour_Eiffel_Wikimedia_Commons.jpg/480px-Tour_Eiffel_Wikimedia_Commons.jpg', 'image', 5, 'multiple_choice'],
+    ['History', 'easy', 'What monument is shown?', 'Statue of Liberty', 'Lincoln Memorial', 'Washington Monument', 'Mount Rushmore', 200,
+     'https://upload.wikimedia.org/wikipedia/commons/thumb/a/a1/Statue_of_Liberty_7.jpg/480px-Statue_of_Liberty_7.jpg', 'image', 5, 'multiple_choice'],
+    ['History', 'medium', 'What ancient wonder is this?', 'The Great Pyramid of Giza', 'The Colosseum', 'Stonehenge', 'Machu Picchu', 400,
+     'https://upload.wikimedia.org/wikipedia/commons/thumb/e/e3/Kheops-Pyramid.jpg/480px-Kheops-Pyramid.jpg', 'image', 5, 'multiple_choice'],
+    ['History', 'medium', 'What landmark is shown?', 'The Colosseum', 'The Pantheon', 'The Parthenon', 'Trevi Fountain', 400,
+     'https://upload.wikimedia.org/wikipedia/commons/thumb/d/de/Colosseo_2020.jpg/480px-Colosseo_2020.jpg', 'image', 5, 'multiple_choice'],
+    ['History', 'easy', 'What is this national landmark?', 'Mount Rushmore', 'Grand Canyon', 'Yosemite', 'Yellowstone', 200,
+     'https://upload.wikimedia.org/wikipedia/commons/thumb/9/97/Dean_Franklin_-_06.04.03_Mount_Rushmore_Monument_%28by-sa%29-3_new.jpg/480px-Dean_Franklin_-_06.04.03_Mount_Rushmore_Monument_%28by-sa%29-3_new.jpg', 'image', 5, 'multiple_choice'],
+    ['Black Culture', 'easy', 'Who is this civil rights leader?', 'Martin Luther King Jr.', 'Malcolm X', 'Frederick Douglass', 'W.E.B. Du Bois', 200,
+     'https://upload.wikimedia.org/wikipedia/commons/thumb/0/05/Martin_Luther_King%2C_Jr..jpg/480px-Martin_Luther_King%2C_Jr..jpg', 'image', 5, 'multiple_choice'],
+    ['Black Culture', 'medium', 'Who is this?', 'Malcolm X', 'Stokely Carmichael', 'Huey P. Newton', 'Bobby Seale', 400,
+     'https://upload.wikimedia.org/wikipedia/commons/thumb/6/6f/Malcolm_X_NYWTS_2a.jpg/480px-Malcolm_X_NYWTS_2a.jpg', 'image', 5, 'multiple_choice'],
+    ['Black Culture', 'easy', 'Who is this US President?', 'Barack Obama', 'Bill Clinton', 'George W. Bush', 'Joe Biden', 200,
+     'https://upload.wikimedia.org/wikipedia/commons/thumb/8/8d/President_Barack_Obama.jpg/480px-President_Barack_Obama.jpg', 'image', 5, 'multiple_choice'],
+    ['Pop Culture', 'medium', 'Who is this actor?', 'Denzel Washington', 'Morgan Freeman', 'Samuel L. Jackson', 'Idris Elba', 400,
+     'https://upload.wikimedia.org/wikipedia/commons/thumb/9/9f/Denzel_Washington_2018.jpg/480px-Denzel_Washington_2018.jpg', 'image', 5, 'multiple_choice'],
+    ['Pop Culture', 'easy', 'Who is this?', 'Will Smith', 'Eddie Murphy', 'Kevin Hart', 'Chris Tucker', 200,
+     'https://upload.wikimedia.org/wikipedia/commons/thumb/9/9d/TechCrunch_Disrupt_2019_%2848834102368%29_%28cropped%29.jpg/480px-TechCrunch_Disrupt_2019_%2848834102368%29_%28cropped%29.jpg', 'image', 5, 'multiple_choice'],
+    ['Science & Tech', 'medium', 'What planet is this?', 'Saturn', 'Jupiter', 'Neptune', 'Uranus', 400,
+     'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c7/Saturn_during_Equinox.jpg/480px-Saturn_during_Equinox.jpg', 'image', 5, 'multiple_choice'],
+    ['Science & Tech', 'easy', 'What planet is this?', 'Mars', 'Mercury', 'Venus', 'Pluto', 200,
+     'https://upload.wikimedia.org/wikipedia/commons/thumb/0/02/OSIRIS_Mars_true_color.jpg/480px-OSIRIS_Mars_true_color.jpg', 'image', 5, 'multiple_choice'],
+    ['Science & Tech', 'hard', 'What animal is this?', 'Cheetah', 'Leopard', 'Jaguar', 'Tiger', 800,
+     'https://upload.wikimedia.org/wikipedia/commons/thumb/6/6b/Acinonyx_jubatus_-_Etosha_2014.jpg/480px-Acinonyx_jubatus_-_Etosha_2014.jpg', 'image', 5, 'multiple_choice'],
+    ['Anime', 'easy', 'Which anime is this from?', 'Naruto', 'One Piece', 'Bleach', 'Dragon Ball', 200,
+     'https://upload.wikimedia.org/wikipedia/en/thumb/9/94/NarutoCoverTankobon1.jpg/480px-NarutoCoverTankobon1.jpg', 'image', 5, 'multiple_choice'],
+    ['Anime', 'easy', 'Which series is this?', 'One Piece', 'Naruto', 'Bleach', 'Hunter x Hunter', 200,
+     'https://upload.wikimedia.org/wikipedia/en/thumb/9/9a/One_Piece%2C_Volume_61_Cover_%28Japanese%29.jpg/480px-One_Piece%2C_Volume_61_Cover_%28Japanese%29.jpg', 'image', 5, 'multiple_choice'],
+    ['Gaming', 'easy', 'What game is this from?', 'Minecraft', 'Roblox', 'Terraria', 'Stardew Valley', 200,
+     'https://upload.wikimedia.org/wikipedia/en/thumb/5/51/Minecraft_cover.png/480px-Minecraft_cover.png', 'image', 5, 'multiple_choice'],
+    ['Gaming', 'medium', 'What game is this?', 'The Legend of Zelda: Breath of the Wild', 'Skyrim', 'Genshin Impact', 'Elden Ring', 400,
+     'https://upload.wikimedia.org/wikipedia/en/thumb/c/c6/The_Legend_of_Zelda_Breath_of_the_Wild.jpg/480px-The_Legend_of_Zelda_Breath_of_the_Wild.jpg', 'image', 5, 'multiple_choice']
+  ];
+
+  mediaQs.forEach(q => { try { ins.run(...q); } catch {} });
+}
+
+function seedOpenEndedQuestions() {
+  const exists = db.prepare(`SELECT COUNT(*) as c FROM custom_questions WHERE answer_type = 'open_ended'`).get().c;
+  if (exists > 0) return;
+  const ins = db.prepare(`
+    INSERT INTO custom_questions
+      (category, difficulty, question, correct_answer, wrong_1, wrong_2, wrong_3, point_value, answer_type, accepted_answers)
+    VALUES (?, ?, ?, ?, '', '', '', ?, 'open_ended', ?)
+  `);
+
+  const openQs = [
+    ['Hip Hop', 'easy', "Type the name of the rapper from Compton with the album 'good kid m.A.A.d city'.",
+     'Kendrick Lamar', 200, JSON.stringify(['Kendrick', 'Kendrick Lamar', 'K Dot', 'K-Dot'])],
+    ['Hip Hop', 'easy', "Type the name of Drake's hometown.",
+     'Toronto', 200, JSON.stringify(['Toronto', 'Toronto Canada', 'Toronto, Canada'])],
+    ['Hip Hop', 'medium', "What was Tupac's first name?",
+     'Tupac', 400, JSON.stringify(['Tupac', '2pac', '2 Pac', 'Tupac Amaru'])],
+    ['Hip Hop', 'hard', "What rapper is known as 'King Push'?",
+     'Pusha T', 800, JSON.stringify(['Pusha T', 'Pusha-T', 'Terrence Thornton'])],
+    ['Sports', 'easy', "Type the name of the NBA team Kobe Bryant played for his entire career.",
+     'Lakers', 200, JSON.stringify(['Lakers', 'LA Lakers', 'Los Angeles Lakers', 'L.A. Lakers'])],
+    ['Sports', 'easy', "What is the maximum number of points a player can score on a single basketball play?",
+     '4', 200, JSON.stringify(['4', 'four', 'Four'])],
+    ['Sports', 'medium', "Type the name of the NFL team that won Super Bowl LV.",
+     'Tampa Bay Buccaneers', 400, JSON.stringify(['Tampa Bay Buccaneers', 'Buccaneers', 'Tampa Bay', 'Bucs'])],
+    ['Sports', 'hard', "Who is the only NBA player with 30,000 points, 10,000 rebounds, and 10,000 assists?",
+     'LeBron James', 800, JSON.stringify(['LeBron James', 'LeBron', 'Lebron James', 'Lebron'])],
+    ['Anime', 'easy', "Type the name of Goku's home planet.",
+     'Vegeta', 200, JSON.stringify(['Vegeta', 'Planet Vegeta'])],
+    ['Anime', 'medium', "Name Naruto's signature jutsu.",
+     'Rasengan', 400, JSON.stringify(['Rasengan', 'Spiraling Sphere'])],
+    ['Anime', 'medium', "What is the name of the giant titan that breached Wall Maria?",
+     'Colossal Titan', 400, JSON.stringify(['Colossal Titan', 'Colossus Titan', 'The Colossal Titan'])],
+    ['Anime', 'hard', "Name the protagonist of Hunter x Hunter.",
+     'Gon Freecss', 800, JSON.stringify(['Gon', 'Gon Freecss', 'Gon Freaks'])],
+    ['Gaming', 'easy', "Type the name of the plumber Nintendo mascot.",
+     'Mario', 200, JSON.stringify(['Mario', 'Super Mario'])],
+    ['Gaming', 'medium', "Name the protagonist of The Legend of Zelda series.",
+     'Link', 400, JSON.stringify(['Link'])],
+    ['Gaming', 'hard', "What was the original name of the GTA V protagonist Trevor's company?",
+     'Trevor Philips Industries', 800, JSON.stringify(['Trevor Philips Industries', 'TPI', 'Trevor Phillips Industries'])],
+    ['Pop Culture', 'easy', "Type the name of Tony Stark's superhero alter ego.",
+     'Iron Man', 200, JSON.stringify(['Iron Man', 'Ironman'])],
+    ['Pop Culture', 'easy', "What is the name of the wizarding school Harry Potter attends?",
+     'Hogwarts', 200, JSON.stringify(['Hogwarts', 'Hogwarts School of Witchcraft and Wizardry'])],
+    ['Pop Culture', 'medium', "Name the show featuring Walter White.",
+     'Breaking Bad', 400, JSON.stringify(['Breaking Bad'])],
+    ['Pop Culture', 'medium', "What HBO drama follows the Soprano crime family?",
+     'The Sopranos', 400, JSON.stringify(['The Sopranos', 'Sopranos'])],
+    ['Pop Culture', 'hard', "Name the director of the original Black Panther film.",
+     'Ryan Coogler', 800, JSON.stringify(['Ryan Coogler', 'Coogler'])],
+    ['Black Culture', 'easy', "Type the first name of the first Black US president.",
+     'Barack', 200, JSON.stringify(['Barack', 'Barack Obama', 'Obama'])],
+    ['Black Culture', 'medium', "Name the city where the 1965 Watts riots took place.",
+     'Los Angeles', 400, JSON.stringify(['Los Angeles', 'LA', 'L.A.', 'Watts', 'Los Angeles California'])],
+    ['Black Culture', 'medium', "Name the activist who said 'I have a dream' in 1963.",
+     'Martin Luther King Jr.', 400, JSON.stringify(['Martin Luther King Jr.', 'Martin Luther King', 'MLK', 'Dr. King', 'King'])],
+    ['Black Culture', 'hard', "Name the founder of the Black Panther Party (one of two).",
+     'Huey P. Newton', 800, JSON.stringify(['Huey P. Newton', 'Huey Newton', 'Bobby Seale'])],
+    ['Science & Tech', 'easy', "Name the closest planet to the sun.",
+     'Mercury', 200, JSON.stringify(['Mercury'])],
+    ['Science & Tech', 'easy', "What gas do plants absorb during photosynthesis?",
+     'Carbon Dioxide', 200, JSON.stringify(['Carbon Dioxide', 'CO2', 'CO₂'])],
+    ['Science & Tech', 'medium', "Name the chemical element with symbol Au.",
+     'Gold', 400, JSON.stringify(['Gold', 'Aurum'])],
+    ['Science & Tech', 'medium', "Who founded Apple alongside Steve Jobs?",
+     'Steve Wozniak', 400, JSON.stringify(['Steve Wozniak', 'Wozniak', 'Woz'])],
+    ['Science & Tech', 'hard', "Name the JavaScript runtime built on Chrome's V8 engine.",
+     'Node.js', 800, JSON.stringify(['Node.js', 'Node', 'NodeJS'])],
+    ['History', 'easy', "Type the year the United States declared independence.",
+     '1776', 200, JSON.stringify(['1776'])],
+    ['History', 'medium', "Name the British prime minister during most of WWII.",
+     'Winston Churchill', 400, JSON.stringify(['Winston Churchill', 'Churchill', 'Sir Winston Churchill'])],
+    ['History', 'hard', "What city was the capital of the Byzantine Empire?",
+     'Constantinople', 800, JSON.stringify(['Constantinople', 'Byzantium', 'Istanbul'])]
+  ];
+
+  openQs.forEach(q => { try { ins.run(...q); } catch {} });
+}
+
 seedPlayers();
 seedAchievements();
 seedCosmetics();
 seedCustomQuestions();
+seedMediaQuestions();
+seedOpenEndedQuestions();
 
 module.exports = { db };

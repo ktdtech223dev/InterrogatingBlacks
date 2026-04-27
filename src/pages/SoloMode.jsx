@@ -165,6 +165,7 @@ export default function SoloMode() {
   }
 
   if (phase === 'question' && question) {
+    const isOpen = question.answer_type === 'open_ended';
     return (
       <div className="min-h-screen p-6">
         <div className="flex justify-between mb-2">
@@ -173,14 +174,30 @@ export default function SoloMode() {
         </div>
         <div className="mb-4"><Timer key={timerKey} duration={question.time_limit} /></div>
         <div className="font-bebas text-3xl text-center my-8">{question.question}</div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-w-3xl mx-auto">
-          {question.answers.map((a, i) => (
-            <button key={i} onClick={() => socket.emit('solo_answer', { answer: a })}
-              className="btn text-xl py-6">
-              {String.fromCharCode(65 + i)}. {a}
-            </button>
-          ))}
-        </div>
+        {isOpen ? (
+          <div className="max-w-xl mx-auto">
+            <div className="text-center text-sm text-gray-400 mb-2">✏️ Type your answer</div>
+            <input
+              autoFocus
+              placeholder="Type and press Enter..."
+              className="input text-2xl text-center py-4 font-bebas"
+              onKeyDown={e => {
+                if (e.key === 'Enter' && e.target.value.trim()) {
+                  socket.emit('solo_answer', { answer: e.target.value.trim() });
+                }
+              }}
+            />
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-w-3xl mx-auto">
+            {question.answers.map((a, i) => (
+              <button key={i} onClick={() => socket.emit('solo_answer', { answer: a })}
+                className="btn text-xl py-6">
+                {String.fromCharCode(65 + i)}. {a}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
     );
   }

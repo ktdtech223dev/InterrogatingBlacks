@@ -49,20 +49,29 @@ async function fetchAPI(catId, diff, count = 2) {
 }
 
 function getCustom(category, count = 5) {
-  return db.prepare(`SELECT * FROM custom_questions WHERE category = ? ORDER BY RANDOM() LIMIT ?`).all(category, count).map(q => ({
-    id: q.id,
-    question: q.question,
-    correct_answer: q.correct_answer,
-    wrong_answers: [q.wrong_1, q.wrong_2, q.wrong_3],
-    answers: [q.correct_answer, q.wrong_1, q.wrong_2, q.wrong_3].sort(() => Math.random() - 0.5),
-    point_value: q.point_value,
-    is_custom: true,
-    has_media: !!q.media_url,
-    media_url: q.media_url,
-    media_type: q.media_type,
-    media_duration: q.media_duration_sec || 5,
-    category: q.category
-  }));
+  return db.prepare(`SELECT * FROM custom_questions WHERE category = ? ORDER BY RANDOM() LIMIT ?`).all(category, count).map(q => {
+    const isOpen = q.answer_type === 'open_ended';
+    let accepted = [];
+    if (q.accepted_answers) {
+      try { accepted = JSON.parse(q.accepted_answers); } catch { accepted = []; }
+    }
+    return {
+      id: q.id,
+      question: q.question,
+      correct_answer: q.correct_answer,
+      wrong_answers: isOpen ? [] : [q.wrong_1, q.wrong_2, q.wrong_3].filter(Boolean),
+      answers: isOpen ? null : [q.correct_answer, q.wrong_1, q.wrong_2, q.wrong_3].filter(Boolean).sort(() => Math.random() - 0.5),
+      point_value: q.point_value,
+      is_custom: true,
+      has_media: !!q.media_url,
+      media_url: q.media_url,
+      media_type: q.media_type,
+      media_duration: q.media_duration_sec || 5,
+      category: q.category,
+      answer_type: q.answer_type || 'multiple_choice',
+      accepted_answers: accepted.length ? accepted : (isOpen ? [q.correct_answer] : null)
+    };
+  });
 }
 
 async function buildBoard(boardIndex) {

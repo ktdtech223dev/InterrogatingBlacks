@@ -3,6 +3,23 @@ const { SABOTAGES, POWERUPS, BROKE_BOY } = require('./items');
 const { db } = require('./database');
 const { checkAndUnlock, updatePlayerStats, updateSeasonStandings } = require('./achievements');
 
+function normalizeAnswer(s) {
+  if (s == null) return '';
+  return String(s).toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+}
+function isAnswerCorrect(question, submitted) {
+  if (submitted == null) return false;
+  if (question.answer_type === 'open_ended') {
+    const norm = normalizeAnswer(submitted);
+    if (!norm) return false;
+    const accepted = (question.accepted_answers && question.accepted_answers.length)
+      ? question.accepted_answers
+      : [question.correct_answer];
+    return accepted.some(a => normalizeAnswer(a) === norm);
+  }
+  return submitted === question.correct_answer;
+}
+
 const PHASE = {
   LOBBY: 'lobby', BOARD: 'board', MEDIA: 'media',
   QUESTION: 'question', BET: 'bet', REVEAL: 'reveal',
@@ -176,9 +193,12 @@ class Game {
   }
 
   buildQuestionPayload() {
+    const isOpen = this.curQ.answer_type === 'open_ended';
+    const { correct_answer, accepted_answers, wrong_answers, ...rest } = this.curQ;
     return {
-      ...this.curQ,
-      answers: this.curQ.answers || [this.curQ.correct_answer, ...this.curQ.wrong_answers].sort(() => Math.random() - 0.5)
+      ...rest,
+      answers: isOpen ? null : (this.curQ.answers || [correct_answer, ...(wrong_answers || [])].sort(() => Math.random() - 0.5)),
+      answer_type: this.curQ.answer_type || 'multiple_choice'
     };
   }
 
@@ -237,7 +257,7 @@ class Game {
     Object.entries(this.players).forEach(([id, player]) => {
       const sub = this.answers[id];
       const fx = this.effects[id] || [];
-      const isCorrect = sub?.answer === correct;
+      const isCorrect = isAnswerCorrect(this.curQ, sub?.answer);
       if (!isCorrect) allCorrect = false;
 
       const qPts = this.curQ.point_value;

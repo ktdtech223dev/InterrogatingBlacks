@@ -299,8 +299,9 @@ export default function Game() {
     const extendTimer = effects.find(e => e.type === 'extend_timer');
     const timeLimit = reduceTimer?.value || extendTimer?.value || 20;
     const fifty = effects.some(e => e.type === 'fifty_fifty');
-    let visibleAnswers = question.answers;
-    if (fifty) {
+    const isOpen = question.answer_type === 'open_ended';
+    let visibleAnswers = question.answers || [];
+    if (!isOpen && fifty && question.answers) {
       const correctIdx = question.answers.indexOf(question.correct_answer);
       const wrongs = question.answers.filter((_, i) => i !== correctIdx);
       const keep = wrongs[Math.floor(Math.random() * wrongs.length)];
@@ -328,16 +329,41 @@ export default function Game() {
 
         <div className="font-bebas text-3xl text-center my-8">{question.question}</div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-w-3xl mx-auto w-full">
-          {visibleAnswers.map((a, i) => (
-            <button key={i}
-              onClick={() => !myAnswer && submit(a)}
+        {isOpen ? (
+          <div className="max-w-xl mx-auto w-full">
+            <div className="text-center text-sm text-gray-400 mb-2">✏️ Type your answer (spelling-tolerant)</div>
+            <input
+              autoFocus
               disabled={!!myAnswer}
-              className={`btn text-xl py-6 ${myAnswer === a ? 'btn-primary pulse-strong' : ''}`}>
-              {hideAnswers ? '???' : `${String.fromCharCode(65 + i)}. ${a}`}
-            </button>
-          ))}
-        </div>
+              placeholder="Type your answer..."
+              className="input text-2xl text-center py-4 font-bebas"
+              defaultValue={myAnswer || ''}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && e.target.value.trim() && !myAnswer) {
+                  submit(e.target.value.trim());
+                }
+              }}
+              ref={el => { if (el && myAnswer) el.value = myAnswer; }}
+            />
+            {!myAnswer && (
+              <div className="text-center text-xs text-gray-500 mt-2">Press Enter to lock in</div>
+            )}
+            {myAnswer && (
+              <div className="mt-3 text-center font-bebas text-2xl text-green-400">🔒 LOCKED: {myAnswer}</div>
+            )}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-w-3xl mx-auto w-full">
+            {visibleAnswers.map((a, i) => (
+              <button key={i}
+                onClick={() => !myAnswer && submit(a)}
+                disabled={!!myAnswer}
+                className={`btn text-xl py-6 ${myAnswer === a ? 'btn-primary pulse-strong' : ''}`}>
+                {hideAnswers ? '???' : `${String.fromCharCode(65 + i)}. ${a}`}
+              </button>
+            ))}
+          </div>
+        )}
 
         <div className="text-center mt-6 text-gray-400">
           {locked.length} / {state?.players?.length || 0} locked in

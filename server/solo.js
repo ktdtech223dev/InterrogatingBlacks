@@ -2,6 +2,23 @@ const { buildBoard } = require('./questions');
 const { db } = require('./database');
 const { checkAndUnlock, updatePlayerStats } = require('./achievements');
 
+function normalizeAnswer(s) {
+  if (s == null) return '';
+  return String(s).toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+}
+function isAnswerCorrect(question, submitted) {
+  if (submitted == null) return false;
+  if (question.answer_type === 'open_ended') {
+    const norm = normalizeAnswer(submitted);
+    if (!norm) return false;
+    const accepted = (question.accepted_answers && question.accepted_answers.length)
+      ? question.accepted_answers
+      : [question.correct_answer];
+    return accepted.some(a => normalizeAnswer(a) === norm);
+  }
+  return submitted === question.correct_answer;
+}
+
 class SoloRun {
   constructor(io, socketId, playerId) {
     this.io = io;
@@ -62,9 +79,11 @@ class SoloRun {
   showSoloQuestion() {
     this.phase = 'question';
     this.qStartTime = Date.now();
+    const isOpen = this.curQ.answer_type === 'open_ended';
     this.emit('solo_question', {
       question: this.curQ.question,
-      answers: this.curQ.answers || [this.curQ.correct_answer, ...this.curQ.wrong_answers].sort(() => Math.random() - 0.5),
+      answers: isOpen ? null : (this.curQ.answers || [this.curQ.correct_answer, ...this.curQ.wrong_answers].sort(() => Math.random() - 0.5)),
+      answer_type: this.curQ.answer_type || 'multiple_choice',
       point_value: this.curQ.point_value,
       category: this.curQ.category,
       time_limit: 20
@@ -77,7 +96,7 @@ class SoloRun {
     clearTimeout(this.timer);
     const q = this.curQ;
     const correct = q.correct_answer;
-    const isCorrect = answer === correct;
+    const isCorrect = isAnswerCorrect(q, answer);
     const elapsed = Date.now() - this.qStartTime;
 
     let earned = 0;
