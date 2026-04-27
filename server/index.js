@@ -4,21 +4,24 @@ const { Server } = require('socket.io');
 const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
+const cron = require('node-cron');
 const { Game } = require('./game');
 const { SoloRun } = require('./solo');
 const { db } = require('./database');
 const { getPlayerAchievements, getPlayerStats, getSeasonStandings } = require('./achievements');
+const { runScrape } = require('./scraper');
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*' } });
 
 app.use(express.json());
-const baseDir = process.pkg ? path.dirname(process.execPath) : path.join(__dirname, '..');
+const dataDir = process.env.DATA_DIR
+  || (process.pkg ? path.dirname(process.execPath) : path.join(__dirname, '..'));
 const distDir = path.join(__dirname, '..', 'dist');
 app.use(express.static(distDir));
 
-const uploadsDir = path.join(baseDir, 'uploads');
+const uploadsDir = path.join(dataDir, 'uploads');
 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
 app.use('/uploads', express.static(uploadsDir));
 
@@ -163,5 +166,27 @@ io.on('connection', socket => {
   });
 });
 
-const PORT = 3847;
-server.listen(PORT, () => console.log(`🎯 Interrogating Blacks :${PORT}`));
+app.post('/api/admin/scrape', async (req, res) => {
+  try {
+    const result = await runScrape();
+    res.json({ status: 'ok', ...result });
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+// Weekly scrape: every Sunday at 03:00 UTC
+cron.schedule('0 3 * * 0', () => {
+  console.log('[cron] weekly scrape starting...');
+  runScrape().catch(err => console.error('[cron] scrape failed:', err));
+}, { timezone: 'UTC' });
+
+// Run once at startup if DB has < 100 questions
+const initialCount = db.prepare('SELECT COUNT(*) as c FROM custom_questions').get().c;
+if (initialCount < 100) {
+  console.log(`[startup] only ${initialCount} questions, kicking off initial scrape...`);
+  setTimeout(() => runScrape().catch(err => console.error('[startup scrape] failed:', err)), 5000);
+}
+
+const PORT = process.env.PORT || 3847;
+server.listen(PORT, '0.0.0.0', () => console.log(`🎯 Interrogating Blacks :${PORT} (data: ${dataDir})`));

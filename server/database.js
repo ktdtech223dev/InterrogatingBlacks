@@ -1,7 +1,10 @@
 const Database = require('better-sqlite3');
 const path = require('path');
-const baseDir = process.pkg ? path.dirname(process.execPath) : path.join(__dirname, '..');
-const db = new Database(path.join(baseDir, 'interrogating.db'));
+const fs = require('fs');
+const dataDir = process.env.DATA_DIR
+  || (process.pkg ? path.dirname(process.execPath) : path.join(__dirname, '..'));
+if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+const db = new Database(path.join(dataDir, 'interrogating.db'));
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS players (
