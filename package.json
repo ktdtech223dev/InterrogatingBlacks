@@ -1,8 +1,9 @@
 {
   "name": "interrogating-blacks",
-  "version": "1.0.0",
+  "version": "1.0.1",
+  "description": "Multiplayer trivia game for the N Games launcher",
   "private": true,
-  "bin": "server/index.js",
+  "main": "electron/main.js",
   "scripts": {
     "dev": "concurrently \"npm run server\" \"npm run client\"",
     "server": "node server/index.js",
@@ -10,21 +11,48 @@
     "build": "vite build",
     "preview": "vite preview",
     "start": "node server/index.js",
-    "build:exe": "vite build && pkg . --targets node18-win-x64 --output release/InterrogatingBlacks.exe"
+    "electron": "electron .",
+    "electron:dev": "vite build && electron .",
+    "build:exe": "vite build && electron-builder --win portable --publish never"
   },
-  "pkg": {
-    "assets": [
+  "build": {
+    "appId": "com.ngames.interrogatingblacks",
+    "productName": "Interrogating Blacks",
+    "files": [
+      "electron/**/*",
+      "server/**/*",
       "dist/**/*",
-      "public/**/*",
-      "node_modules/better-sqlite3/build/Release/*.node"
+      "node_modules/**/*",
+      "package.json"
     ],
-    "scripts": [
-      "server/**/*.js"
-    ]
+    "asarUnpack": [
+      "node_modules/better-sqlite3/**/*",
+      "node_modules/bindings/**/*",
+      "node_modules/file-uri-to-path/**/*"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "InterrogatingBlacks-${version}-portable.exe"
+    },
+    "portable": {
+      "artifactName": "InterrogatingBlacks-${version}-portable.exe"
+    },
+    "nodeGypRebuild": false,
+    "buildDependenciesFromSource": false,
+    "directories": {
+      "output": "release"
+    }
   },
   "dependencies": {
     "axios": "^1.7.7",
-    "better-sqlite3": "^11.3.0",
+    "better-sqlite3": "^12.9.0",
     "express": "^4.19.2",
     "he": "^1.2.0",
     "multer": "^1.4.5-lts.1",
@@ -39,7 +67,8 @@
     "@vitejs/plugin-react": "^4.3.2",
     "autoprefixer": "^10.4.20",
     "concurrently": "^9.0.1",
-    "pkg": "^5.8.1",
+    "electron": "^41.3.0",
+    "electron-builder": "^26.8.1",
     "postcss": "^8.4.47",
     "tailwindcss": "^3.4.13",
     "vite": "^5.4.8"

@@ -2,7 +2,9 @@ const path = require('path');
 const fs = require('fs');
 
 // ── Crash-to-file so users can see what happened when double-clicked ──
-const _baseDirEarly = process.pkg ? path.dirname(process.execPath) : path.join(__dirname, '..');
+const _baseDirEarly = process.env.DATA_DIR
+  || (process.pkg ? path.dirname(process.execPath) : path.join(__dirname, '..'));
+try { if (!fs.existsSync(_baseDirEarly)) fs.mkdirSync(_baseDirEarly, { recursive: true }); } catch {}
 const _logFile = path.join(_baseDirEarly, 'interrogating-blacks.log');
 function _log(msg) {
   const line = `[${new Date().toISOString()}] ${msg}\n`;
@@ -164,7 +166,8 @@ io.on('connection', socket => {
     }
   });
 
-  socket.on('start', ({ boardCount }) => games[socket.room]?.start(boardCount || 3));
+  socket.on('ready', () => games[socket.room]?.toggleReady(socket.id));
+  socket.on('start', ({ boardCount }) => games[socket.room]?.start(boardCount || 3, socket.id));
   socket.on('select_q', ({ catIdx, qIdx }) => games[socket.room]?.selectQuestion(socket.id, catIdx, qIdx));
   socket.on('answer', ({ answer }) => games[socket.room]?.submitAnswer(socket.id, answer));
   socket.on('bet', ({ targetId, amount }) => games[socket.room]?.placeBet(socket.id, targetId, amount));

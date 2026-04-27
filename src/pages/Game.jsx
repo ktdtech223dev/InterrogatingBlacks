@@ -82,6 +82,7 @@ export default function Game() {
       const myAch = g.achievements?.[socket.id];
       if (myAch?.length) setToastQueue(myAch);
     });
+    socket.on('returned_to_lobby', () => navigate('/lobby'));
 
     return () => socket?.removeAllListeners();
   }, []);
@@ -101,6 +102,7 @@ export default function Game() {
   };
 
   const isHost = state?.hostId === socket?.id;
+  const showHostUI = isHost && (state?.players?.length || 0) >= 5;
 
   // ── PHASE: Game Over ───────────
   if (phase === 'game_over' && gameOver) {
@@ -194,7 +196,7 @@ export default function Game() {
           })}
         </div>
 
-        {isHost && (
+        {showHostUI && (
           <div className="fixed bottom-4 right-4 bg-yellow-900/80 p-3 rounded">
             <button onClick={() => socket.emit('host_close_shop')} className="btn btn-danger">🔒 Close Shop</button>
           </div>
@@ -243,29 +245,35 @@ export default function Game() {
   // ── PHASE: Bet ───────────
   if (phase === 'bet' && betPhase) {
     const myPts = state?.players?.find(p => p.id === socket?.id)?.points || 0;
+    const others = betPhase.players.filter(p => p.id !== socket?.id);
     return (
       <div className="min-h-screen p-6">
         <div className="font-bebas text-4xl text-yellow-400 text-center mb-2">EVERYONE LOCKED IN</div>
-        <div className="font-bebas text-2xl text-center mb-4">PLACE YOUR BETS</div>
+        <div className="font-bebas text-xl text-center mb-1 text-gray-400">Bet on someone being WRONG to double your money</div>
         <div className="max-w-md mx-auto mb-6"><Timer key={timerKey} duration={betPhase.timeLimit} /></div>
         <div className="text-center mb-4">Your bank: <span className="font-bebas text-yellow-400 text-2xl">${myPts}</span></div>
 
         <div className="space-y-2 max-w-2xl mx-auto">
-          {betPhase.players.filter(p => p.id !== socket?.id).map(p => (
+          {others.map(p => (
             <div key={p.id} className="flex items-center gap-3 p-3 rounded" style={{ background: 'var(--bg3)', borderLeft: `4px solid ${p.color}` }}>
               <div className="font-bebas text-xl flex-1">{p.name}</div>
-              <div className="text-sm text-gray-400">Bet on WRONG:</div>
-              <input type="number" min="0" placeholder="100" className="input w-24"
+              <input type="number" min="0" placeholder="amount" className="input w-28"
                 onKeyDown={e => {
                   if (e.key === 'Enter' && +e.target.value > 0) {
                     placeBet(p.id, +e.target.value);
                     e.target.value = '';
                   }
                 }} />
-              {bets[p.id] && <div className="text-yellow-400">Bet: ${bets[p.id]}</div>}
+              <button className="btn text-sm" onClick={(e) => {
+                const inp = e.currentTarget.parentElement.querySelector('input');
+                if (inp && +inp.value > 0) { placeBet(p.id, +inp.value); inp.value = ''; }
+              }}>BET</button>
+              {bets[p.id] && <div className="text-yellow-400 font-bebas">${bets[p.id]}</div>}
             </div>
           ))}
         </div>
+
+        <div className="text-center mt-6 text-gray-400 text-sm">No bet? Just wait — phase ends in {betPhase.timeLimit}s.</div>
       </div>
     );
   }
@@ -334,7 +342,7 @@ export default function Game() {
         <div className="text-center mt-6 text-gray-400">
           {locked.length} / {state?.players?.length || 0} locked in
         </div>
-        {isHost && (
+        {showHostUI && (
           <div className="fixed bottom-4 right-4 flex gap-2">
             <button onClick={() => socket.emit('host_skip')} className="btn btn-danger text-xs">⏭ Skip</button>
             <button onClick={() => socket.emit('host_extend_timer')} className="btn text-xs">⏰ +20s</button>

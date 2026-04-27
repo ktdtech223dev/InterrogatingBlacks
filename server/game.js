@@ -42,7 +42,8 @@ class Game {
       title: playerData.title,
       cosmetic: playerData.cosmetic_theme,
       buttons: playerData.cosmetic_buttons,
-      points: 0
+      points: 0,
+      ready: false
     };
     this.effects[socketId] = [];
     this.shopLocked[socketId] = false;
@@ -66,7 +67,30 @@ class Game {
     this.broadcast('state', this.getState());
   }
 
-  async start(boardCount) {
+  toggleReady(socketId) {
+    const p = this.players[socketId];
+    if (!p) return;
+    if (this.phase !== PHASE.LOBBY) return;
+    p.ready = !p.ready;
+    this.broadcast('state', this.getState());
+  }
+
+  canStart() {
+    const list = Object.values(this.players);
+    if (list.length < 2) return false;
+    return list.every(p => p.ready);
+  }
+
+  async start(boardCount, requestedBy) {
+    if (requestedBy && requestedBy !== this.hostId) return;
+    if (!this.canStart()) {
+      this.broadcast('start_blocked', {
+        reason: Object.keys(this.players).length < 2
+          ? 'Need at least 2 players'
+          : 'All players must be ready'
+      });
+      return;
+    }
     this.totalBoards = boardCount;
     this.boards = [];
     this.gameStartTime = Date.now();
@@ -549,6 +573,26 @@ class Game {
       scores, winner, duration,
       achievements: allUnlocked
     });
+
+    // Reset to lobby state after game-over so players can rematch
+    setTimeout(() => {
+      this.phase = PHASE.LOBBY;
+      this.boards = [];
+      this.curBoard = 0;
+      this.curQ = null;
+      this.answers = {};
+      this.bets = {};
+      this.boardsCleared = 0;
+      Object.values(this.players).forEach(p => {
+        p.points = 0;
+        p.ready = false;
+      });
+      Object.keys(this.effects).forEach(id => { this.effects[id] = []; });
+      Object.keys(this.shopLocked).forEach(id => { this.shopLocked[id] = false; });
+      this.brokeBoyCounts = {};
+      this.betsWonThisGame = {};
+      this.broadcast('returned_to_lobby', this.getState());
+    }, 60000);
   }
 
   getScores() {
@@ -556,7 +600,8 @@ class Game {
       .map(([id, p]) => ({
         id, name: p.name, color: p.color,
         points: p.points, title: p.title,
-        initial: p.initial, playerId: p.playerId
+        initial: p.initial, playerId: p.playerId,
+        ready: p.ready || false
       }))
       .sort((a, b) => b.points - a.points);
   }
