@@ -141,6 +141,29 @@ app.get('/api/history', (req, res) => {
   res.json(db.prepare(`SELECT * FROM game_history ORDER BY played_at DESC LIMIT 20`).all());
 });
 
+app.post('/api/admin/scrape', async (req, res) => {
+  try {
+    const passes = Math.min(20, Math.max(1, parseInt(req.query.passes) || 1));
+    const result = await runScrape({ passes });
+    res.json({ status: 'ok', ...result });
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+app.get('/api/questions/stats', (req, res) => {
+  const total = db.prepare('SELECT COUNT(*) as c FROM custom_questions').get().c;
+  const byCategory = db.prepare(`
+    SELECT category, COUNT(*) as count FROM custom_questions GROUP BY category ORDER BY count DESC
+  `).all();
+  const byDifficulty = db.prepare(`
+    SELECT difficulty, COUNT(*) as count FROM custom_questions GROUP BY difficulty ORDER BY count DESC
+  `).all();
+  const open = db.prepare(`SELECT COUNT(*) as c FROM custom_questions WHERE answer_type='open_ended'`).get().c;
+  const media = db.prepare(`SELECT COUNT(*) as c FROM custom_questions WHERE media_url IS NOT NULL AND media_url != ''`).get().c;
+  res.json({ total, open_ended: open, media, byCategory, byDifficulty });
+});
+
 app.get('*', (req, res) => {
   const indexPath = path.join(__dirname, '..', 'dist', 'index.html');
   if (fs.existsSync(indexPath)) res.sendFile(indexPath);
@@ -189,27 +212,6 @@ io.on('connection', socket => {
     if (socket.room) games[socket.room]?.removePlayer(socket.id);
     delete soloRuns[socket.id];
   });
-});
-
-app.post('/api/admin/scrape', async (req, res) => {
-  try {
-    const passes = Math.min(20, Math.max(1, parseInt(req.query.passes) || 1));
-    const result = await runScrape({ passes });
-    res.json({ status: 'ok', ...result });
-  } catch (e) {
-    res.status(500).json({ error: String(e) });
-  }
-});
-
-app.get('/api/questions/stats', (req, res) => {
-  const total = db.prepare('SELECT COUNT(*) as c FROM custom_questions').get().c;
-  const byCategory = db.prepare(`
-    SELECT category, COUNT(*) as count FROM custom_questions GROUP BY category ORDER BY count DESC
-  `).all();
-  const byDifficulty = db.prepare(`
-    SELECT difficulty, COUNT(*) as count FROM custom_questions GROUP BY difficulty ORDER BY count DESC
-  `).all();
-  res.json({ total, byCategory, byDifficulty });
 });
 
 // Weekly scrape: every Sunday at 03:00 UTC
