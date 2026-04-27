@@ -193,11 +193,23 @@ io.on('connection', socket => {
 
 app.post('/api/admin/scrape', async (req, res) => {
   try {
-    const result = await runScrape();
+    const passes = Math.min(20, Math.max(1, parseInt(req.query.passes) || 1));
+    const result = await runScrape({ passes });
     res.json({ status: 'ok', ...result });
   } catch (e) {
     res.status(500).json({ error: String(e) });
   }
+});
+
+app.get('/api/questions/stats', (req, res) => {
+  const total = db.prepare('SELECT COUNT(*) as c FROM custom_questions').get().c;
+  const byCategory = db.prepare(`
+    SELECT category, COUNT(*) as count FROM custom_questions GROUP BY category ORDER BY count DESC
+  `).all();
+  const byDifficulty = db.prepare(`
+    SELECT difficulty, COUNT(*) as count FROM custom_questions GROUP BY difficulty ORDER BY count DESC
+  `).all();
+  res.json({ total, byCategory, byDifficulty });
 });
 
 // Weekly scrape: every Sunday at 03:00 UTC
