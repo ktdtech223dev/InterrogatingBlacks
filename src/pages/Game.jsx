@@ -44,8 +44,19 @@ export default function Game() {
     // Ask server for current state in case we mounted after game_started fired
     socket.emit('request_state');
 
-    socket.on('game_started', s => setState(s));
-    socket.on('state', s => setState(s));
+    socket.on('game_started', s => { setState(s); setPhase('board'); setReveal(null); setShop(null); setQuestion(null); setMedia(null); });
+    socket.on('state', s => {
+      setState(s);
+      // Server-driven phase changes (e.g., back-to-board after reveal) need to override local UI phase
+      if (s?.phase === 'board') {
+        setPhase('board');
+        setReveal(null);
+        setQuestion(null);
+        setMedia(null);
+      } else if (s?.phase === 'lobby') {
+        // game ended/reset
+      }
+    });
     socket.on('media_phase', m => { setPhase('media'); setMedia(m); setQuestion(null); setMyAnswer(null); setLocked([]); });
     socket.on('question_started', q => {
       setPhase('question');
