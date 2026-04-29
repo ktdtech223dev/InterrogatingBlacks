@@ -1,6 +1,7 @@
 const { buildBoard } = require('./questions');
 const { db } = require('./database');
 const { checkAndUnlock, updatePlayerStats } = require('./achievements');
+const ngames = require('./ngames');
 
 function normalizeAnswer(s) {
   if (s == null) return '';
@@ -146,6 +147,10 @@ class SoloRun {
     const totalTime = Date.now() - this.startTime;
     const isPerfect = this.wrong === 0;
 
+    // Check current global record BEFORE inserting this run
+    const prevGlobalBest = db.prepare(`SELECT MIN(total_time_ms) as best FROM solo_runs`).get()?.best;
+    const isWorldRecord = !prevGlobalBest || totalTime < prevGlobalBest;
+
     db.prepare(`INSERT INTO solo_runs (player_id, boards_completed, total_time_ms, total_correct, total_wrong, score) VALUES (?,1,?,?,?,?)`)
       .run(this.playerId, totalTime, this.correct, this.wrong, this.score);
 
@@ -184,6 +189,52 @@ class SoloRun {
       is_perfect: isPerfect,
       leaderboard,
       achievements: unlocked
+    });
+
+    // ── N Games Network ───────────────────────────────────────────────────────
+    // Fire-and-forget: submit session + wall post (never block the socket response)
+    setImmediate(() => {
+      try {
+        const player = db.prepare(`SELECT username, display_name FROM players WHERE id=?`).get(this.playerId);
+        if (!player) return;
+
+        const profileId   = player.username;
+        const displayName = player.display_name;
+        const mins        = Math.floor(totalTime / 60000);
+        const secs        = ((totalTime % 60000) / 1000).toFixed(1);
+        const timeStr     = `${mins}m ${secs}s`;
+        const scoreStr    = this.score.toLocaleString();
+
+        // Submit session for XP
+        ngames.submitSession(profileId, this.score, {
+          total_time_ms: totalTime,
+          correct:       this.correct,
+          wrong:         this.wrong,
+          is_perfect:    isPerfect,
+          is_world_record: isWorldRecord,
+        }).catch(() => {});
+
+        // Wall post — @everyone on a new crew record, regular post otherwise
+        let wallMsg;
+        if (isWorldRecord) {
+          wallMsg =
+            `@everyone 🏆 NEW CREW RECORD! ${displayName} blitzed the solo board ` +
+            `in ${timeStr} with ${scoreStr} pts! Think you can beat that? 🎙️`;
+        } else if (isPerfect) {
+          wallMsg =
+            `🎙️ Went FLAWLESS on the solo board! ${timeStr} — ${scoreStr} pts. ` +
+            `Zero wrong answers 💯`;
+        } else {
+          wallMsg =
+            `🎙️ Finished a solo run in ${timeStr} — ${scoreStr} pts ` +
+            `(${this.correct}/${this.correct + this.wrong} correct)`;
+        }
+
+        ngames.postToWall(profileId, wallMsg).catch(() => {});
+      } catch (e) {
+        // Never crash the game over an analytics failure
+        console.warn('[ngames] wall post failed:', e.message);
+      }
     });
   }
 
