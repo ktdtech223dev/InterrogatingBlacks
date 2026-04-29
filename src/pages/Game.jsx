@@ -25,6 +25,9 @@ export default function Game() {
   const [shop, setShop] = useState(null);
   const [shopTab, setShopTab] = useState('powerups');
   const [shopTarget, setShopTarget] = useState(null);
+  const [showInventory, setShowInventory] = useState(false);
+  const [deployingItem, setDeployingItem] = useState(null); // {itemId, item}
+  const [itemCatalog, setItemCatalog] = useState({ sabotages: [], powerups: [] });
   const [gameOver, setGameOver] = useState(null);
   const [achievements, setAchievements] = useState([]);
   const [activeToast, setActiveToast] = useState(null);
@@ -84,9 +87,20 @@ export default function Game() {
       }
       if (r.betResults?.[socket.id]) SOUNDS.bet_win();
     });
-    socket.on('shop_opened', s => { setPhase('shop'); setShop(s); SOUNDS.shop_open(); setTimerKey(k=>k+1); });
+    socket.on('shop_opened', s => {
+      setPhase('shop');
+      setShop(s);
+      // Cache the item catalog so the inventory FAB can render item info anytime
+      setItemCatalog({ sabotages: s.sabotages || [], powerups: s.powerups || [] });
+      SOUNDS.shop_open();
+      setTimerKey(k=>k+1);
+    });
     socket.on('item_bought', d => {
       setShop(prev => prev ? { ...prev, scores: d.scores } : prev);
+    });
+    socket.on('item_deployed', () => {
+      setDeployingItem(null);
+      setShowInventory(false);
     });
     socket.on('shield_blocked', d => alert(`🛡 Shield blocked sabotage on ${d.targetName}!`));
     socket.on('broke_steal', d => alert(`🤡 ${d.thiefName} stole $${d.amount} from ${d.victimName}!`));
@@ -120,6 +134,78 @@ export default function Game() {
 
   const isHost = state?.hostId === socket?.id;
   const showHostUI = isHost && (state?.players?.length || 0) >= 5;
+  const myInv = state?.inventories?.[socket?.id] || [];
+  const allItems = [...itemCatalog.sabotages, ...itemCatalog.powerups];
+  const itemById = (id) => allItems.find(i => i.id === id);
+
+  const InventoryFAB = () => (
+    <>
+      {myInv.length > 0 && !showInventory && (
+        <button
+          onClick={() => setShowInventory(true)}
+          className="fixed bottom-4 left-4 btn btn-primary text-lg z-40"
+          style={{ background: 'linear-gradient(135deg, #6366f1, #4338ca)', color: 'white' }}
+        >
+          🎒 INVENTORY ({myInv.length})
+        </button>
+      )}
+      {showInventory && (
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4"
+             onClick={() => { setShowInventory(false); setDeployingItem(null); }}>
+          <div className="bg-gray-900 max-w-3xl w-full p-6 rounded-lg" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between mb-3">
+              <div className="font-bebas text-3xl text-yellow-400">🎒 YOUR INVENTORY</div>
+              <button onClick={() => { setShowInventory(false); setDeployingItem(null); }} className="text-2xl">✕</button>
+            </div>
+            {myInv.length === 0 && <div className="text-gray-500 text-center py-8">Empty. Buy sabotages or power-ups in the shop between boards.</div>}
+            {!deployingItem && (
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                {myInv.map((id, i) => {
+                  const item = itemById(id);
+                  if (!item) return null;
+                  return (
+                    <button key={i} onClick={() => {
+                      if (item.needsTarget) setDeployingItem({ itemId: id, item });
+                      else { socket.emit('deploy_item', { itemId: id }); setShowInventory(false); }
+                    }} className="p-3 rounded text-left hover:bg-gray-800" style={{ background: 'var(--bg3)' }}>
+                      <div className="text-3xl text-center">{item.icon}</div>
+                      <div className="font-bebas text-lg text-center">{item.name}</div>
+                      <div className="text-xs text-gray-300 text-center mt-1">{item.desc}</div>
+                      <div className="text-xs text-yellow-400 text-center mt-1">
+                        {item.needsTarget ? 'Tap to choose target →' : 'Tap to deploy'}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            {deployingItem && (
+              <div>
+                <div className="text-center mb-3">
+                  <div className="text-3xl">{deployingItem.item.icon}</div>
+                  <div className="font-bebas text-2xl">{deployingItem.item.name}</div>
+                  <div className="text-sm text-gray-300">{deployingItem.item.desc}</div>
+                </div>
+                <div className="font-bebas text-lg text-yellow-400 text-center mb-2">PICK YOUR TARGET</div>
+                <div className="grid grid-cols-2 gap-2">
+                  {state?.players?.filter(p => p.id !== socket?.id).map(p => (
+                    <button key={p.id} onClick={() => {
+                      socket.emit('deploy_item', { itemId: deployingItem.itemId, targetId: p.id });
+                      setShowInventory(false);
+                      setDeployingItem(null);
+                    }} className="btn text-xl py-3" style={{ background: p.color, color: 'white' }}>
+                      {p.name}
+                    </button>
+                  ))}
+                </div>
+                <button onClick={() => setDeployingItem(null)} className="btn w-full mt-3">← Back</button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </>
+  );
 
   // ── PHASE: Game Over ───────────
   if (phase === 'game_over' && gameOver) {
@@ -178,11 +264,18 @@ export default function Game() {
           </div>
         )}
 
+        <div className="text-center text-xs text-gray-400 mb-3">
+          {shopTab === 'brokeboy'
+            ? 'Broke Boy items resolve immediately.'
+            : 'Sabotages & power-ups go to your inventory — deploy them later when the moment is right.'}
+        </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 max-w-5xl mx-auto">
           {items.map(item => {
             const canBuy = !locked && (shopTab !== 'brokeboy' || isLast);
             const myPts = shop.scores.find(s => s.id === socket?.id)?.points || 0;
             const affords = myPts >= item.cost;
+            // Broke boy items still take target picker (some need it). Sabotages/powerups skip it.
+            const targetPickerNeeded = shopTab === 'brokeboy' && item.needsTarget;
             return (
               <div key={item.id} className="p-4 rounded-lg" style={{ background: 'var(--bg3)' }}>
                 <div className="text-4xl text-center">{item.icon}</div>
@@ -194,7 +287,7 @@ export default function Game() {
                 <div className="font-bebas text-2xl text-yellow-400 text-center mt-2">
                   {item.cost === 0 ? 'FREE' : `$${item.cost}`}
                 </div>
-                {item.needsTarget && (
+                {targetPickerNeeded && (
                   <select className="input mt-2" value={shopTarget?.[item.id] || ''}
                     onChange={e => setShopTarget(p => ({ ...p, [item.id]: e.target.value }))}>
                     <option value="">Select target...</option>
@@ -204,10 +297,10 @@ export default function Game() {
                   </select>
                 )}
                 <button
-                  disabled={!canBuy || !affords || (item.needsTarget && !shopTarget?.[item.id])}
+                  disabled={!canBuy || !affords || (targetPickerNeeded && !shopTarget?.[item.id])}
                   onClick={() => socket.emit('buy', { itemId: item.id, targetId: shopTarget?.[item.id] })}
                   className="btn btn-primary w-full mt-2"
-                >BUY</button>
+                >{shopTab === 'brokeboy' ? 'USE' : 'STOW'}</button>
               </div>
             );
           })}
@@ -291,6 +384,7 @@ export default function Game() {
         </div>
 
         <div className="text-center mt-6 text-gray-400 text-sm">No bet? Just wait — phase ends in {betPhase.timeLimit}s.</div>
+        <InventoryFAB />
       </div>
     );
   }
@@ -304,6 +398,7 @@ export default function Game() {
         <MediaDisplay url={media.media_url} type={media.media_type} />
         <div className="font-bebas text-xl text-gray-400 mt-4">PAY ATTENTION...</div>
         <div className="max-w-md w-full mt-4"><Timer key={timerKey} duration={media.duration} /></div>
+        <InventoryFAB />
       </div>
     );
   }
@@ -391,6 +486,7 @@ export default function Game() {
             <button onClick={() => socket.emit('host_extend_timer')} className="btn text-xs">⏰ +20s</button>
           </div>
         )}
+        <InventoryFAB />
       </div>
     );
   }
@@ -436,6 +532,7 @@ export default function Game() {
         <Scoreboard players={state?.players || []} hostId={state?.hostId} mySocketId={socket?.id} />
       </div>
       {activeToast && <AchievementToast achievement={activeToast} onDismiss={() => setActiveToast(null)} />}
+      <InventoryFAB />
     </div>
   );
 }

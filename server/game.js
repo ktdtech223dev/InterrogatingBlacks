@@ -1,4 +1,4 @@
-const { buildBoard } = require('./questions');
+const { buildBoard, markQuestionUsed } = require('./questions');
 const { SABOTAGES, POWERUPS, BROKE_BOY } = require('./items');
 const { db } = require('./database');
 const { checkAndUnlock, updatePlayerStats, updateSeasonStandings } = require('./achievements');
@@ -62,7 +62,8 @@ class Game {
       cosmetic: playerData.cosmetic_theme,
       buttons: playerData.cosmetic_buttons,
       points: 0,
-      ready: false
+      ready: false,
+      inventory: []
     };
     this.effects[socketId] = [];
     this.shopLocked[socketId] = false;
@@ -113,8 +114,14 @@ class Game {
     this.totalBoards = boardCount;
     this.boards = [];
     this.gameStartTime = Date.now();
-    this.usedCustomIds = [];
-    this.usedQuestionTexts = new Set();
+    // Note: usedCustomIds and usedQuestionTexts persist across games in the same room
+    // so the same lobby playing back-to-back doesn't see repeats. They reset only when
+    // they grow large enough to risk starvation (handled below).
+    if (this.usedCustomIds.length > 1500) this.usedCustomIds = this.usedCustomIds.slice(-300);
+    if (this.usedQuestionTexts.size > 1500) {
+      const arr = Array.from(this.usedQuestionTexts);
+      this.usedQuestionTexts = new Set(arr.slice(-300));
+    }
     for (let i = 0; i < boardCount; i++) {
       const newBoard = await buildBoard(i, {
         excludeCustomIds: this.usedCustomIds,
@@ -374,6 +381,8 @@ class Game {
     });
 
     this.boards[this.curBoard][this.curQ.catIdx].questions[this.curQ.qIdx].answered = true;
+    if (this.curQ.id) markQuestionUsed(this.curQ.id);
+    if (this.curQ.question) this.usedQuestionTexts.add(this.curQ.question);
 
     const allAnswered = this.boards[this.curBoard].every(cat => cat.questions.every(q => q.answered));
 
@@ -439,6 +448,9 @@ class Game {
     const item = all.find(i => i.id === itemId);
     if (!item) return;
     const isBroke = BROKE_BOY.some(b => b.id === itemId);
+    const isSabotage = SABOTAGES.some(s => s.id === itemId);
+    const isPowerup = POWERUPS.some(p => p.id === itemId);
+
     if (isBroke) {
       const scores = this.getScores();
       const lastPlace = scores[scores.length - 1];
@@ -448,33 +460,77 @@ class Game {
     if (buyer.points < item.cost) return;
     buyer.points -= item.cost;
 
+    if (isBroke) {
+      // Broke Boy items resolve immediately — they're emergency desperate moves.
+      this.applyItem(buyerId, item, targetId);
+      this.brokeBoyCounts[buyerId] = (this.brokeBoyCounts[buyerId] || 0) + 1;
+      updatePlayerStats(buyer.playerId, { broke_boy_count: 1 });
+      this.broadcast('item_bought', {
+        buyerName: buyer.name,
+        item,
+        targetName: targetId ? this.players[targetId]?.name : null,
+        scores: this.getScores()
+      });
+      return;
+    }
+
+    // Sabotages and powerups go into inventory; deployed later.
+    buyer.inventory.push({
+      itemId,
+      acquiredAt: Date.now(),
+      isSabotage,
+      isPowerup
+    });
+
+    this.broadcast('item_bought', {
+      buyerName: buyer.name,
+      item,
+      targetName: null,
+      stowed: true, // signals it went to inventory
+      scores: this.getScores(),
+      inventory: { [buyerId]: buyer.inventory }
+    });
+    this.broadcast('state', this.getState());
+  }
+
+  deployItem(buyerId, itemId, targetId) {
+    const buyer = this.players[buyerId];
+    if (!buyer) return;
+    // Can only deploy outside shop/lobby/game-over (i.e., during board, media, question, bet)
+    if ([PHASE.LOBBY, PHASE.SHOP, PHASE.GAME_OVER, PHASE.REVEAL].includes(this.phase)) return;
+    const idx = buyer.inventory.findIndex(it => it.itemId === itemId);
+    if (idx === -1) return;
+    const all = [...SABOTAGES, ...POWERUPS];
+    const item = all.find(i => i.id === itemId);
+    if (!item) return;
+
     const target = targetId ? this.players[targetId] : null;
 
+    // Shield interception
     const hasShield = target && (this.effects[targetId] || []).some(e => e.type === 'block_sabotage');
     if (hasShield && SABOTAGES.some(s => s.id === itemId)) {
       this.effects[targetId] = (this.effects[targetId] || []).filter(e => e.type !== 'block_sabotage');
-      buyer.points += item.cost;
+      buyer.inventory.splice(idx, 1);
       this.broadcast('shield_blocked', { targetName: target.name });
+      this.broadcast('state', this.getState());
       return;
     }
 
     this.applyItem(buyerId, item, targetId);
+    buyer.inventory.splice(idx, 1);
 
-    if (isBroke) {
-      this.brokeBoyCounts[buyerId] = (this.brokeBoyCounts[buyerId] || 0) + 1;
-      updatePlayerStats(buyer.playerId, { broke_boy_count: 1 });
-    }
     if (SABOTAGES.some(s => s.id === itemId)) {
       updatePlayerStats(buyer.playerId, { sabotages_used: 1 });
       if (target) updatePlayerStats(target.playerId, { times_sabotaged: 1 });
     }
 
-    this.broadcast('item_bought', {
+    this.broadcast('item_deployed', {
       buyerName: buyer.name,
       item,
       targetName: target?.name || null,
       scores: this.getScores()
     });
+    this.broadcast('state', this.getState());
   }
 
   applyItem(buyerId, item, targetId) {
@@ -632,6 +688,7 @@ class Game {
       Object.values(this.players).forEach(p => {
         p.points = 0;
         p.ready = false;
+        p.inventory = [];
       });
       Object.keys(this.effects).forEach(id => { this.effects[id] = []; });
       Object.keys(this.shopLocked).forEach(id => { this.shopLocked[id] = false; });
@@ -647,9 +704,18 @@ class Game {
         id, name: p.name, color: p.color,
         points: p.points, title: p.title,
         initial: p.initial, playerId: p.playerId,
-        ready: p.ready || false
+        ready: p.ready || false,
+        inventoryCount: (p.inventory || []).length
       }))
       .sort((a, b) => b.points - a.points);
+  }
+
+  getInventories() {
+    const out = {};
+    Object.entries(this.players).forEach(([id, p]) => {
+      out[id] = (p.inventory || []).map(it => it.itemId);
+    });
+    return out;
   }
 
   getPlayerList() {
@@ -666,6 +732,7 @@ class Game {
       curBoard: this.curBoard,
       totalBoards: this.totalBoards,
       hostId: this.hostId,
+      inventories: this.getInventories(),
       board: this.boards[this.curBoard]?.map(cat => ({
         category: cat.category,
         is_custom: cat.is_custom,

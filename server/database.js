@@ -125,9 +125,10 @@ db.exec(`
 `);
 
 // Idempotent ALTER TABLE migrations for older DBs
-['answer_type TEXT DEFAULT \'multiple_choice\'', 'accepted_answers TEXT'].forEach(col => {
+['answer_type TEXT DEFAULT \'multiple_choice\'', 'accepted_answers TEXT', 'last_used_at DATETIME'].forEach(col => {
   try { db.exec(`ALTER TABLE custom_questions ADD COLUMN ${col}`); } catch {}
 });
+try { db.exec('CREATE INDEX IF NOT EXISTS idx_custom_questions_last_used ON custom_questions(category, last_used_at)'); } catch {}
 
 function seedPlayers() {
   const count = db.prepare('SELECT COUNT(*) as c FROM players').get().c;

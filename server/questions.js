@@ -48,21 +48,37 @@ async function fetchAPI(catId, diff, count = 2) {
   } catch { return []; }
 }
 
+// Mark question as used so future calls deprioritize it.
+function markQuestionUsed(id) {
+  if (!id) return;
+  try {
+    db.prepare('UPDATE custom_questions SET last_used_at = CURRENT_TIMESTAMP WHERE id = ?').run(id);
+  } catch {}
+}
+
 function getCustom(category, count = 5, excludeIds = []) {
+  // Prefer questions never used or used the longest ago, then random within ties.
+  // CASE makes never-used (NULL last_used_at) come before old ones.
+  const baseSql = `
+    SELECT * FROM custom_questions
+    WHERE category = ?
+    {{EXCLUDE}}
+    ORDER BY CASE WHEN last_used_at IS NULL THEN 0 ELSE 1 END,
+             last_used_at ASC,
+             RANDOM()
+    LIMIT ?
+  `;
   let rows;
   if (excludeIds && excludeIds.length) {
     const placeholders = excludeIds.map(() => '?').join(',');
-    rows = db.prepare(
-      `SELECT * FROM custom_questions WHERE category = ? AND id NOT IN (${placeholders}) ORDER BY RANDOM() LIMIT ?`
-    ).all(category, ...excludeIds, count);
+    rows = db.prepare(baseSql.replace('{{EXCLUDE}}', `AND id NOT IN (${placeholders})`))
+      .all(category, ...excludeIds, count);
     if (rows.length < count) {
-      const filler = db.prepare(
-        `SELECT * FROM custom_questions WHERE category = ? ORDER BY RANDOM() LIMIT ?`
-      ).all(category, count - rows.length);
+      const filler = db.prepare(baseSql.replace('{{EXCLUDE}}', '')).all(category, count - rows.length);
       rows = rows.concat(filler);
     }
   } else {
-    rows = db.prepare(`SELECT * FROM custom_questions WHERE category = ? ORDER BY RANDOM() LIMIT ?`).all(category, count);
+    rows = db.prepare(baseSql.replace('{{EXCLUDE}}', '')).all(category, count);
   }
   return rows.map(q => {
     const isOpen = q.answer_type === 'open_ended';
@@ -156,4 +172,4 @@ async function buildBoard(boardIndex, options = {}) {
   return board.slice(0, 5);
 }
 
-module.exports = { buildBoard, getCustom };
+module.exports = { buildBoard, getCustom, markQuestionUsed };

@@ -196,6 +196,7 @@ io.on('connection', socket => {
   socket.on('answer', ({ answer }) => games[socket.room]?.submitAnswer(socket.id, answer));
   socket.on('bet', ({ targetId, amount }) => games[socket.room]?.placeBet(socket.id, targetId, amount));
   socket.on('buy', ({ itemId, targetId }) => games[socket.room]?.buyItem(socket.id, itemId, targetId));
+  socket.on('deploy_item', ({ itemId, targetId }) => games[socket.room]?.deployItem(socket.id, itemId, targetId));
   socket.on('host_skip', () => games[socket.room]?.hostSkipQuestion(socket.id));
   socket.on('host_extend_timer', () => games[socket.room]?.hostExtendTimer(socket.id));
   socket.on('host_close_shop', () => games[socket.room]?.hostCloseShop(socket.id));
