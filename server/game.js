@@ -1,7 +1,8 @@
 const { buildBoard, markQuestionUsed } = require('./questions');
 const { SABOTAGES, POWERUPS, BROKE_BOY } = require('./items');
 const { db } = require('./database');
-const { checkAndUnlock, updatePlayerStats, updateSeasonStandings } = require('./achievements');
+const { checkAndUnlock, updatePlayerStats, updateSeasonStandings, getSeasonStandings } = require('./achievements');
+const ngames = require('./ngames');
 
 function normalizeAnswer(s) {
   if (s == null) return '';
@@ -674,6 +675,62 @@ class Game {
     this.broadcast('game_over', {
       scores, winner, duration,
       achievements: allUnlocked
+    });
+
+    // ── N Games Network: game result + season standings ───────────────────────
+    setImmediate(() => {
+      try {
+        if (!winner?.playerId) return;
+
+        // Look up usernames for all scored players
+        const playerRows = scores.map(s => {
+          if (!s.playerId) return null;
+          return db.prepare(`SELECT username, display_name FROM players WHERE id=?`).get(s.playerId);
+        });
+
+        const winnerRow = playerRows[0];
+        if (!winnerRow) return;
+
+        // Submit session for the winner
+        ngames.submitSession(winnerRow.username, winner.points, {
+          result:    'win',
+          duration_seconds: duration,
+        }).catch(() => {});
+
+        // Build score line for the wall post
+        const scoreLines = scores.map((s, i) => {
+          const row = playerRows[i];
+          const name = row?.display_name || s.name || '?';
+          const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`;
+          return `${medal} ${name} — $${Number(s.points).toLocaleString()}`;
+        }).join('  |  ');
+
+        // Multiplayer game result post
+        const othersStr = scores.slice(1).map((s, i) => playerRows[i + 1]?.display_name || s.name).join(', ');
+        const gameMsg =
+          `🎙️ ${winnerRow.display_name} won an Interrogating Blacks match` +
+          (othersStr ? ` vs ${othersStr}!` : '!') + `\n` +
+          `📊 Final: ${scoreLines}`;
+
+        ngames.postToWall(winnerRow.username, gameMsg).catch(() => {});
+
+        // Season standings post (posted as whoever is currently #1 in season)
+        const standings = getSeasonStandings(1);
+        if (standings.length > 0) {
+          const standingsLines = standings.slice(0, 5).map((s, i) => {
+            const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`;
+            return `${medal} ${s.display_name} — ${s.wins}W, $${Number(s.points).toLocaleString()}`;
+          }).join('\n');
+
+          const topRow = db.prepare(`SELECT username FROM players WHERE id=?`).get(standings[0].player_id);
+          if (topRow) {
+            const standingsMsg = `📊 IB Season Standings after this match:\n${standingsLines}`;
+            ngames.postToWall(topRow.username, standingsMsg).catch(() => {});
+          }
+        }
+      } catch (e) {
+        console.warn('[ngames] endGame post failed:', e.message);
+      }
     });
 
     // Reset to lobby state after game-over so players can rematch

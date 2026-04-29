@@ -214,20 +214,33 @@ class SoloRun {
           is_world_record: isWorldRecord,
         }).catch(() => {});
 
-        // Wall post — @everyone on a new crew record, regular post otherwise
+        // Wall post — @everyone on world record, special flair for PB, normal otherwise
+        const total = this.correct + this.wrong;
         let wallMsg;
+
         if (isWorldRecord) {
+          // 🚨 @everyone — new crew world record
           wallMsg =
-            `@everyone 🏆 NEW CREW RECORD! ${displayName} blitzed the solo board ` +
-            `in ${timeStr} with ${scoreStr} pts! Think you can beat that? 🎙️`;
+            `@everyone 🏆🏆 NEW CREW RECORD SET! 🏆🏆\n` +
+            `${displayName} demolished the solo board!\n` +
+            `⏱ Time: ${timeStr}  |  ✅ ${this.correct}/${total} correct  |  💰 $${scoreStr}\n` +
+            `Can ANYONE beat that? 🎙️`;
+        } else if (isPB) {
+          // 🌟 Personal best — grabs attention without @everyone
+          wallMsg =
+            `🌟 NEW PERSONAL BEST! 🌟\n` +
+            `${displayName} crushed their own solo record!\n` +
+            `⏱ Time: ${timeStr}  |  ✅ ${this.correct}/${total} correct  |  💰 $${scoreStr}`;
         } else if (isPerfect) {
+          // Flawless run, not a PB
           wallMsg =
-            `🎙️ Went FLAWLESS on the solo board! ${timeStr} — ${scoreStr} pts. ` +
-            `Zero wrong answers 💯`;
+            `💯 FLAWLESS RUN! ${displayName} answered every question correctly!\n` +
+            `⏱ Time: ${timeStr}  |  ✅ ${total}/${total} correct  |  💰 $${scoreStr}`;
         } else {
+          // Standard completion
           wallMsg =
-            `🎙️ Finished a solo run in ${timeStr} — ${scoreStr} pts ` +
-            `(${this.correct}/${this.correct + this.wrong} correct)`;
+            `🎙️ ${displayName} finished a solo run.\n` +
+            `⏱ Time: ${timeStr}  |  ✅ ${this.correct}/${total} correct  |  💰 $${scoreStr}`;
         }
 
         ngames.postToWall(profileId, wallMsg).catch(() => {});
