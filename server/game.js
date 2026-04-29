@@ -47,6 +47,8 @@ class Game {
     this.gameStartTime = null;
     this.brokeBoyCounts = {};
     this.betsWonThisGame = {};
+    this.usedCustomIds = [];
+    this.usedQuestionTexts = new Set();
   }
 
   addPlayer(socketId, playerData) {
@@ -111,8 +113,19 @@ class Game {
     this.totalBoards = boardCount;
     this.boards = [];
     this.gameStartTime = Date.now();
+    this.usedCustomIds = [];
+    this.usedQuestionTexts = new Set();
     for (let i = 0; i < boardCount; i++) {
-      this.boards.push(await buildBoard(i));
+      const newBoard = await buildBoard(i, {
+        excludeCustomIds: this.usedCustomIds,
+        excludeQuestionTexts: this.usedQuestionTexts
+      });
+      // Track everything we just put on this board so future boards don't repeat
+      newBoard.forEach(cat => cat.questions.forEach(q => {
+        if (q.id) this.usedCustomIds.push(q.id);
+        if (q.question) this.usedQuestionTexts.add(q.question);
+      }));
+      this.boards.push(newBoard);
     }
     this.phase = PHASE.BOARD;
     const st = this.getState();
@@ -384,8 +397,15 @@ class Game {
     });
 
     setTimeout(() => {
-      if (allAnswered) this.openShop();
-      else {
+      if (allAnswered) {
+        const isFinalBoard = this.curBoard >= this.totalBoards - 1;
+        if (isFinalBoard) {
+          // Skip shop on final board — go straight to game over
+          this.endGame();
+        } else {
+          this.openShop();
+        }
+      } else {
         this.phase = PHASE.BOARD;
         this.broadcast('state', this.getState());
       }

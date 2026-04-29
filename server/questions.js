@@ -48,8 +48,23 @@ async function fetchAPI(catId, diff, count = 2) {
   } catch { return []; }
 }
 
-function getCustom(category, count = 5) {
-  return db.prepare(`SELECT * FROM custom_questions WHERE category = ? ORDER BY RANDOM() LIMIT ?`).all(category, count).map(q => {
+function getCustom(category, count = 5, excludeIds = []) {
+  let rows;
+  if (excludeIds && excludeIds.length) {
+    const placeholders = excludeIds.map(() => '?').join(',');
+    rows = db.prepare(
+      `SELECT * FROM custom_questions WHERE category = ? AND id NOT IN (${placeholders}) ORDER BY RANDOM() LIMIT ?`
+    ).all(category, ...excludeIds, count);
+    if (rows.length < count) {
+      const filler = db.prepare(
+        `SELECT * FROM custom_questions WHERE category = ? ORDER BY RANDOM() LIMIT ?`
+      ).all(category, count - rows.length);
+      rows = rows.concat(filler);
+    }
+  } else {
+    rows = db.prepare(`SELECT * FROM custom_questions WHERE category = ? ORDER BY RANDOM() LIMIT ?`).all(category, count);
+  }
+  return rows.map(q => {
     const isOpen = q.answer_type === 'open_ended';
     let accepted = [];
     if (q.accepted_answers) {
@@ -74,7 +89,8 @@ function getCustom(category, count = 5) {
   });
 }
 
-async function buildBoard(boardIndex) {
+async function buildBoard(boardIndex, options = {}) {
+  const { excludeCustomIds = [], excludeQuestionTexts = new Set() } = options;
   const shuffleCustom = [...CUSTOM_CATS].sort(() => Math.random() - 0.5);
   const shuffleAPI = [...API_CATS].sort(() => Math.random() - 0.5);
   const selectedCustom = shuffleCustom.slice(0, 2);
@@ -82,7 +98,7 @@ async function buildBoard(boardIndex) {
   const board = [];
 
   for (const cat of selectedCustom) {
-    const qs = getCustom(cat, 5);
+    const qs = getCustom(cat, 5, excludeCustomIds);
     if (qs.length >= 3) {
       board.push({
         category: cat,
@@ -97,20 +113,20 @@ async function buildBoard(boardIndex) {
     const easy = await fetchAPI(cat.id, 'easy', 1);
     const med = await fetchAPI(cat.id, 'medium', 2);
     const hard = await fetchAPI(cat.id, 'hard', 2);
-    const qs = [...easy, ...med, ...hard];
-    if (qs.length >= 3) {
+    const fresh = [...easy, ...med, ...hard].filter(q => !excludeQuestionTexts.has(q.question));
+    if (fresh.length >= 3) {
       board.push({
         category: cat.name,
-        questions: qs.slice(0, 5).map(q => ({ ...q, answered: false })),
+        questions: fresh.slice(0, 5).map(q => ({ ...q, answered: false })),
         is_custom: false
       });
     }
   }
 
   while (board.length < 5) {
-    const fallback = shuffleCustom[board.length];
+    const fallback = shuffleCustom[board.length] || CUSTOM_CATS[Math.floor(Math.random() * CUSTOM_CATS.length)];
     if (!fallback) break;
-    const qs = getCustom(fallback, 5);
+    const qs = getCustom(fallback, 5, excludeCustomIds);
     if (qs.length === 0) break;
     board.push({
       category: fallback,

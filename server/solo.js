@@ -36,7 +36,10 @@ class SoloRun {
   }
 
   async start() {
-    this.board = await buildBoard(0);
+    this.board = await buildBoard(0, {
+      excludeCustomIds: [],
+      excludeQuestionTexts: new Set()
+    });
     this.startTime = Date.now();
     this.phase = 'board';
     this.emit('solo_started', {
