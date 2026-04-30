@@ -9,10 +9,123 @@ import { SOUNDS } from '../components/SoundEngine';
 let socket;
 
 function fmtTime(ms) {
+  if (!ms) return '--:--';
   const s = Math.floor(ms / 1000);
   const m = Math.floor(s / 60);
   const r = s % 60;
   return `${m}:${String(r).padStart(2, '0')}.${String(ms % 1000).padStart(3, '0').slice(0, 2)}`;
+}
+
+function fmtTimeShort(ms) {
+  if (!ms) return '--:--';
+  const s = Math.floor(ms / 1000);
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return `${m}:${String(r).padStart(2, '0')}`;
+}
+
+function fmtScore(score) {
+  if (!score) return '$0';
+  return '$' + Number(score).toLocaleString();
+}
+
+function Leaderboard({ data, currentPlayerId }) {
+  if (!data || data.length === 0) {
+    return <div className="text-center text-gray-500 py-6">No runs yet. Be the first!</div>;
+  }
+  const overallCrown  = data.find(p => p.has_overall_crown);
+  const speedCrown    = data.find(p => p.has_speed_crown);
+  const accuracyCrown = data.find(p => p.has_accuracy_crown);
+
+  return (
+    <div className="leaderboard-wrap">
+      <div className="lb-title"><span>🏆</span><span>CREW LEADERBOARD</span></div>
+      <div className="lb-subtitle">Ranked by Efficiency Score (accuracy 60% · speed 40%)</div>
+
+      <div className="crown-row">
+        <div className="crown-card">
+          <div className="crown-icon">👑</div>
+          <div className="crown-label">OVERALL</div>
+          <div className="crown-player" style={{ color: overallCrown?.color }}>{overallCrown?.display_name || '--'}</div>
+          <div className="crown-stat">{fmtScore(overallCrown?.best_efficiency)}</div>
+        </div>
+        <div className="crown-card">
+          <div className="crown-icon">⚡</div>
+          <div className="crown-label">SPEED</div>
+          <div className="crown-player" style={{ color: speedCrown?.color }}>{speedCrown?.display_name || '--'}</div>
+          <div className="crown-stat">{fmtTimeShort(speedCrown?.best_raw_time)}</div>
+        </div>
+        <div className="crown-card">
+          <div className="crown-icon">🎯</div>
+          <div className="crown-label">ACCURACY</div>
+          <div className="crown-player" style={{ color: accuracyCrown?.color }}>{accuracyCrown?.display_name || '--'}</div>
+          <div className="crown-stat">{accuracyCrown?.best_accuracy || 0}%</div>
+        </div>
+      </div>
+
+      <div className="lb-table">
+        <div className="lb-header">
+          <div className="col-rank">#</div>
+          <div className="col-player">PLAYER</div>
+          <div className="col-score">EFF. SCORE</div>
+          <div className="col-time">TIME</div>
+          <div className="col-acc">ACC</div>
+          <div className="col-ranks">RANKS</div>
+        </div>
+        {data.map((player, idx) => {
+          const isMe = currentPlayerId && player.player_id === currentPlayerId;
+          const accColor = player.best_accuracy >= 80 ? 'var(--correct)'
+                         : player.best_accuracy >= 60 ? 'var(--gold)'
+                         : 'var(--wrong)';
+          const eff = player.best_efficiency || 0;
+          const base = player.best_eff_points || 1;
+          const mult = (eff / base).toFixed(2);
+          return (
+            <div key={player.player_id}
+              className={`lb-row ${idx === 0 ? 'lb-first' : ''} ${isMe ? 'lb-me' : ''}`}
+              style={{ borderLeft: `3px solid ${player.color}` }}>
+              <div className="col-rank">
+                {idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `#${idx + 1}`}
+              </div>
+              <div className="col-player">
+                <div className="player-avatar" style={{ background: player.color, color: '#000' }}>
+                  {player.avatar_initial}
+                </div>
+                <div className="player-info">
+                  <div className="player-name" style={{ color: player.color }}>
+                    {player.display_name}
+                    {player.has_overall_crown && <span className="crown">👑</span>}
+                  </div>
+                  <div className="player-title">{player.title}</div>
+                </div>
+              </div>
+              <div className="col-score">
+                <div className="eff-score">{fmtScore(player.best_efficiency)}</div>
+                <div className="eff-mult">×{mult}</div>
+              </div>
+              <div className="col-time">
+                <div className="time-val">{fmtTimeShort(player.best_raw_time)}</div>
+                {player.has_speed_crown && <div className="speed-crown">⚡</div>}
+              </div>
+              <div className="col-acc">
+                <div className="acc-val" style={{ color: accColor }}>{player.best_accuracy || 0}%</div>
+                {player.has_accuracy_crown && <div className="acc-crown">🎯</div>}
+              </div>
+              <div className="col-ranks">
+                <div className="rank-pill speed">⚡#{player.speed_rank || '-'}</div>
+                <div className="rank-pill acc">🎯#{player.accuracy_rank || '-'}</div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div className="lb-legend">
+        <span>👑 Overall Champion — highest efficiency score</span>
+        <span>⚡ Speed Crown — fastest board clear</span>
+        <span>🎯 Accuracy Crown — most questions correct</span>
+      </div>
+    </div>
+  );
 }
 
 export default function SoloMode() {
@@ -46,6 +159,8 @@ export default function SoloMode() {
     socket.on('solo_finished', d => {
       setPhase('done'); setResults(d);
       if (d.is_pb) SOUNDS.pb(); else SOUNDS.game_over();
+      // Refresh the rich leaderboard so the results screen shows full crown/rank data
+      axios.get('/api/solo/leaderboard').then(r => setLeaderboard(r.data)).catch(() => {});
     });
     return () => socket?.removeAllListeners();
   }, []);
@@ -86,18 +201,8 @@ export default function SoloMode() {
           ))}
         </div>
 
-        <h2 className="font-bebas text-2xl mb-2">🏆 CREW LEADERBOARD</h2>
-        <div className="max-w-2xl space-y-1 mb-6">
-          {leaderboard.length === 0 && <div className="text-gray-500">No runs yet.</div>}
-          {leaderboard.map((r, i) => (
-            <div key={r.player_id} className="flex items-center gap-3 p-2 rounded" style={{ background: 'var(--bg3)' }}>
-              <div className="font-bebas text-xl text-yellow-400 w-8">#{i + 1}</div>
-              <div className="w-6 h-6 rounded-full" style={{ background: r.color }} />
-              <div className="font-bebas text-lg flex-1">{r.display_name}</div>
-              <div className="font-bebas">{fmtTime(r.best_time)}</div>
-              <div className="text-sm text-gray-400">${r.best_score}</div>
-            </div>
-          ))}
+        <div className="max-w-3xl mb-6">
+          <Leaderboard data={leaderboard} currentPlayerId={me} />
         </div>
 
         <button onClick={start} disabled={!me} className="btn btn-primary text-2xl py-4">START SOLO RUN</button>
@@ -107,27 +212,49 @@ export default function SoloMode() {
   }
 
   if (phase === 'done' && results) {
+    const total = results.total_questions || 25;
+    const baseScore = results.score || 0;
+    const eff = results.efficiency_score || 0;
+    const mult = results.efficiency_multiplier || 1;
+    const accPct = results.accuracy_pct || 0;
+    const timeBonusPct = results.time_bonus_pct || 0;
     return (
       <div className="min-h-screen p-6">
         <h1 className="font-bebas text-5xl text-yellow-400 text-center mb-4">RUN COMPLETE</h1>
-        {results.is_pb && <div className="text-center font-bebas text-3xl text-green-400 pop-in">🌟 NEW PERSONAL BEST!</div>}
+        {results.is_world_record && <div className="text-center font-bebas text-3xl text-yellow-300 pop-in">🏆 NEW CREW RECORD!</div>}
+        {results.is_pb && !results.is_world_record && <div className="text-center font-bebas text-3xl text-green-400 pop-in">🌟 NEW PERSONAL BEST!</div>}
         {results.is_perfect && <div className="text-center font-bebas text-3xl text-yellow-400 pop-in">✨ FLAWLESS!</div>}
+
         <div className="text-center my-6">
-          <div className="font-bebas text-7xl text-yellow-400">{fmtTime(results.total_time_ms)}</div>
-          <div className="text-gray-400">Final Score: <span className="font-bebas text-2xl text-white">${results.score}</span></div>
-          <div className="text-gray-400">Correct: {results.correct} · Wrong: {results.wrong}</div>
+          <div className="text-gray-400 text-sm">⏱ TIME · {fmtTime(results.total_time_ms)}</div>
+          <div className="text-gray-400 text-sm">Correct: {results.correct}/{total} · Wrong: {results.wrong}</div>
+          <div className="mt-3 text-gray-400 text-sm">RAW SCORE</div>
+          <div className="font-bebas text-3xl text-white">{fmtScore(baseScore)}</div>
         </div>
 
-        <h2 className="font-bebas text-2xl mb-2">🏆 LEADERBOARD</h2>
-        <div className="max-w-2xl mx-auto space-y-1 mb-6">
-          {results.leaderboard.map((r, i) => (
-            <div key={r.player_id} className="flex items-center gap-3 p-2 rounded" style={{ background: 'var(--bg3)' }}>
-              <div className="font-bebas text-xl text-yellow-400 w-8">#{i + 1}</div>
-              <div className="w-6 h-6 rounded-full" style={{ background: r.color }} />
-              <div className="font-bebas text-lg flex-1">{r.display_name}</div>
-              <div className="font-bebas">{fmtTime(r.best_time)}</div>
+        <div className="max-w-xl mx-auto bg-gray-900 p-5 rounded-lg border-2 border-yellow-500 mb-6 text-center">
+          <div className="text-xs uppercase tracking-widest text-gray-400 mb-1">⭐ Efficiency Score</div>
+          <div className="font-bebas text-6xl text-yellow-400">{fmtScore(eff)}</div>
+          <div className="text-sm text-gray-400 mt-2">
+            {fmtScore(baseScore)} × {mult.toFixed(2)} multiplier
+          </div>
+          <div className="grid grid-cols-2 gap-2 mt-3 text-sm">
+            <div className="bg-gray-800 rounded py-2">
+              <div className="text-gray-400 text-xs">Accuracy bonus</div>
+              <div className="font-bebas text-lg text-green-400">+{Math.round(accPct * 0.6)}%</div>
+              <div className="text-xs text-gray-500">{accPct}% correct</div>
             </div>
-          ))}
+            <div className="bg-gray-800 rounded py-2">
+              <div className="text-gray-400 text-xs">Speed bonus</div>
+              <div className="font-bebas text-lg text-cyan-300">+{Math.round(timeBonusPct * 0.4)}%</div>
+              <div className="text-xs text-gray-500">{timeBonusPct === 0 ? 'over par time' : `${timeBonusPct}% under par`}</div>
+            </div>
+          </div>
+          <div className="text-xs text-gray-500 mt-2">This is what counts for the leaderboard.</div>
+        </div>
+
+        <div className="max-w-3xl mx-auto mb-6">
+          <Leaderboard data={leaderboard} currentPlayerId={me} />
         </div>
 
         {results.achievements?.length > 0 && (

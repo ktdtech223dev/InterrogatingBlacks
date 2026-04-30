@@ -2,6 +2,7 @@ const { buildBoard } = require('./questions');
 const { db } = require('./database');
 const { checkAndUnlock, updatePlayerStats } = require('./achievements');
 const ngames = require('./ngames');
+const { calculateEfficiencyScore, TOTAL_QUESTIONS_PER_BOARD } = require('./efficiency');
 
 function normalizeAnswer(s) {
   if (s == null) return '';
@@ -147,29 +148,33 @@ class SoloRun {
     const totalTime = Date.now() - this.startTime;
     const isPerfect = this.wrong === 0;
 
-    // Check records BEFORE inserting this run so we compare against previous data only
-    const prevGlobalBest = db.prepare(`SELECT MIN(total_time_ms) as best FROM solo_runs`).get()?.best;
-    const prevPersonalBest = db.prepare(`SELECT MIN(total_time_ms) as best FROM solo_runs WHERE player_id=?`).get(this.playerId)?.best;
+    // Compute efficiency score for this run
+    const eff = calculateEfficiencyScore(this.score, this.correct, TOTAL_QUESTIONS_PER_BOARD, totalTime);
 
-    const isWorldRecord = !prevGlobalBest || totalTime < prevGlobalBest;
-    const isPB          = !prevPersonalBest || totalTime < prevPersonalBest;
+    // Check records BEFORE inserting this run so we compare against previous data only.
+    // Efficiency score is now the canonical record for both PB and crew record.
+    const prevGlobalBest = db.prepare(`SELECT MAX(efficiency_score) as best FROM solo_runs`).get()?.best || 0;
+    const prevPersonalBest = db.prepare(`SELECT MAX(efficiency_score) as best FROM solo_runs WHERE player_id=?`).get(this.playerId)?.best || 0;
 
-    db.prepare(`INSERT INTO solo_runs (player_id, boards_completed, total_time_ms, total_correct, total_wrong, score) VALUES (?,1,?,?,?,?)`)
-      .run(this.playerId, totalTime, this.correct, this.wrong, this.score);
+    const isWorldRecord = eff.finalScore > prevGlobalBest;
+    const isPB          = eff.finalScore > prevPersonalBest;
+
+    db.prepare(`INSERT INTO solo_runs (player_id, boards_completed, total_time_ms, total_correct, total_wrong, score, efficiency_score, accuracy_pct, time_bonus_pct) VALUES (?,1,?,?,?,?,?,?,?)`)
+      .run(this.playerId, totalTime, this.correct, this.wrong, this.score, eff.finalScore, eff.accuracy, eff.timeBonus);
 
     updatePlayerStats(this.playerId, { solo_games: 1 });
 
-    if (isPB) {
-      db.prepare(`UPDATE player_stats SET solo_best_time_ms = ? WHERE player_id = ? AND (solo_best_time_ms IS NULL OR solo_best_time_ms > ?)`)
-        .run(totalTime, this.playerId, totalTime);
-    }
+    // Keep solo_best_time_ms in sync with the player's actual fastest run (independent of efficiency).
+    db.prepare(`UPDATE player_stats SET solo_best_time_ms = ? WHERE player_id = ? AND (solo_best_time_ms IS NULL OR solo_best_time_ms > ?)`)
+      .run(totalTime, this.playerId, totalTime);
 
     const leaderboard = db.prepare(`
       SELECT sr.player_id, p.display_name, p.color,
              MIN(sr.total_time_ms) as best_time,
-             MAX(sr.score) as best_score
+             MAX(sr.score) as best_score,
+             MAX(sr.efficiency_score) as best_efficiency
       FROM solo_runs sr JOIN players p ON p.id = sr.player_id
-      GROUP BY sr.player_id ORDER BY best_time ASC LIMIT 10
+      GROUP BY sr.player_id ORDER BY best_efficiency DESC LIMIT 10
     `).all();
 
     const stats = db.prepare(`SELECT * FROM player_stats WHERE player_id=?`).get(this.playerId);
@@ -185,7 +190,13 @@ class SoloRun {
       correct: this.correct,
       wrong: this.wrong,
       score: this.score,
+      efficiency_score:      eff.finalScore,
+      accuracy_pct:          eff.accuracy,
+      time_bonus_pct:        eff.timeBonus,
+      efficiency_multiplier: eff.efficiencyMultiplier,
+      total_questions:       TOTAL_QUESTIONS_PER_BOARD,
       is_pb: isPB,
+      is_world_record: isWorldRecord,
       is_perfect: isPerfect,
       leaderboard,
       achievements: unlocked
@@ -201,47 +212,42 @@ class SoloRun {
         const profileId   = player.username;
         const displayName = player.display_name;
         const mins        = Math.floor(totalTime / 60000);
-        const secs        = ((totalTime % 60000) / 1000).toFixed(1);
-        const timeStr     = `${mins}m ${secs}s`;
+        const wholeSecs   = Math.floor((totalTime % 60000) / 1000);
+        const timeStr     = `${mins}:${String(wholeSecs).padStart(2, '0')}`;
         const scoreStr    = this.score.toLocaleString();
+        const effStr      = eff.finalScore.toLocaleString();
+        const total       = TOTAL_QUESTIONS_PER_BOARD;
 
-        // Submit session for XP
-        ngames.submitSession(profileId, this.score, {
-          total_time_ms: totalTime,
-          correct:       this.correct,
-          wrong:         this.wrong,
-          is_perfect:    isPerfect,
-          is_world_record: isWorldRecord,
+        // Submit efficiency score (the canonical leaderboard score) for XP/launcher
+        ngames.submitSession(profileId, eff.finalScore, {
+          total_time_ms:        totalTime,
+          correct:              this.correct,
+          wrong:                this.wrong,
+          base_score:           this.score,
+          efficiency_score:     eff.finalScore,
+          accuracy_pct:         eff.accuracy,
+          time_bonus_pct:       eff.timeBonus,
+          efficiency_multiplier: eff.efficiencyMultiplier,
+          is_perfect:           isPerfect,
+          is_world_record:      isWorldRecord,
+          is_pb:                isPB
         }).catch(() => {});
 
-        // Wall post — @everyone on world record, special flair for PB, normal otherwise
-        const total = this.correct + this.wrong;
-        let wallMsg;
+        // Wall post — uses efficiency score; @everyone on new crew (efficiency) record
+        const header = isWorldRecord
+          ? `@everyone 🏆🏆 NEW CREW EFFICIENCY RECORD! 🏆🏆\n${displayName} just set the bar.`
+          : isPB
+            ? `🌟 NEW PERSONAL BEST! 🌟\n${displayName} just topped their own efficiency.`
+            : isPerfect
+              ? `💯 FLAWLESS RUN by ${displayName}!`
+              : `🐺 NEW SOLO RUN — ${displayName}`;
 
-        if (isWorldRecord) {
-          // 🚨 @everyone — new crew world record
-          wallMsg =
-            `@everyone 🏆🏆 NEW CREW RECORD SET! 🏆🏆\n` +
-            `${displayName} demolished the solo board!\n` +
-            `⏱ Time: ${timeStr}  |  ✅ ${this.correct}/${total} correct  |  💰 $${scoreStr}\n` +
-            `Can ANYONE beat that? 🎙️`;
-        } else if (isPB) {
-          // 🌟 Personal best — grabs attention without @everyone
-          wallMsg =
-            `🌟 NEW PERSONAL BEST! 🌟\n` +
-            `${displayName} crushed their own solo record!\n` +
-            `⏱ Time: ${timeStr}  |  ✅ ${this.correct}/${total} correct  |  💰 $${scoreStr}`;
-        } else if (isPerfect) {
-          // Flawless run, not a PB
-          wallMsg =
-            `💯 FLAWLESS RUN! ${displayName} answered every question correctly!\n` +
-            `⏱ Time: ${timeStr}  |  ✅ ${total}/${total} correct  |  💰 $${scoreStr}`;
-        } else {
-          // Standard completion
-          wallMsg =
-            `🎙️ ${displayName} finished a solo run.\n` +
-            `⏱ Time: ${timeStr}  |  ✅ ${this.correct}/${total} correct  |  💰 $${scoreStr}`;
-        }
+        const wallMsg =
+          `${header}\n` +
+          `⚡ Time: ${timeStr}\n` +
+          `🎯 Accuracy: ${this.correct}/${total} (${eff.accuracy}%)\n` +
+          `💰 Base Score: $${scoreStr}\n` +
+          `⭐ Efficiency Score: $${effStr} (×${eff.efficiencyMultiplier.toFixed(2)})`;
 
         ngames.postToWall(profileId, wallMsg).catch(() => {});
       } catch (e) {

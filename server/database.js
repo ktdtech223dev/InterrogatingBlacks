@@ -130,6 +130,43 @@ db.exec(`
 });
 try { db.exec('CREATE INDEX IF NOT EXISTS idx_custom_questions_last_used ON custom_questions(category, last_used_at)'); } catch {}
 
+// Solo-run efficiency-score migrations
+[
+  'efficiency_score INTEGER DEFAULT 0',
+  'accuracy_pct INTEGER DEFAULT 0',
+  'time_bonus_pct INTEGER DEFAULT 0'
+].forEach(col => {
+  try { db.exec(`ALTER TABLE solo_runs ADD COLUMN ${col}`); } catch {}
+});
+try { db.exec('CREATE INDEX IF NOT EXISTS idx_solo_runs_efficiency ON solo_runs(player_id, efficiency_score DESC)'); } catch {}
+
+// Backfill efficiency_score for any existing rows that don't have it (or are 0).
+try {
+  const { calculateEfficiencyScore, TOTAL_QUESTIONS_PER_BOARD } = require('./efficiency');
+  const stale = db.prepare(`
+    SELECT id, score, total_correct, total_time_ms
+    FROM solo_runs
+    WHERE efficiency_score IS NULL OR efficiency_score = 0
+  `).all();
+  if (stale.length > 0) {
+    const upd = db.prepare(`
+      UPDATE solo_runs
+      SET efficiency_score = ?, accuracy_pct = ?, time_bonus_pct = ?
+      WHERE id = ?
+    `);
+    const txn = db.transaction((rows) => {
+      for (const r of rows) {
+        const eff = calculateEfficiencyScore(r.score, r.total_correct, TOTAL_QUESTIONS_PER_BOARD, r.total_time_ms);
+        upd.run(eff.finalScore, eff.accuracy, eff.timeBonus, r.id);
+      }
+    });
+    txn(stale);
+    console.log(`[migrate] backfilled efficiency_score on ${stale.length} solo_runs row(s)`);
+  }
+} catch (e) {
+  console.warn('[migrate] solo_runs backfill skipped:', e.message);
+}
+
 function seedPlayers() {
   const count = db.prepare('SELECT COUNT(*) as c FROM players').get().c;
   if (count > 0) return;

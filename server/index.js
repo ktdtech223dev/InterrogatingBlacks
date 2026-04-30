@@ -79,15 +79,82 @@ app.get('/api/standings', (req, res) => {
 });
 
 app.get('/api/solo/leaderboard', (req, res) => {
-  const rows = db.prepare(`
-    SELECT sr.player_id, p.display_name, p.color, p.avatar_initial, p.title,
-           MIN(sr.total_time_ms) as best_time,
-           MAX(sr.score) as best_score,
-           COUNT(*) as runs
+  // For each player, fetch their best-by-efficiency, fastest, and most-accurate runs.
+  const players = db.prepare(`
+    SELECT DISTINCT sr.player_id, p.display_name, p.color, p.avatar_initial, p.title
     FROM solo_runs sr JOIN players p ON p.id = sr.player_id
-    GROUP BY sr.player_id ORDER BY best_time ASC
   `).all();
-  res.json(rows);
+
+  const bestEff = db.prepare(`
+    SELECT efficiency_score, total_time_ms, total_correct, accuracy_pct, score
+    FROM solo_runs
+    WHERE player_id = ?
+    ORDER BY efficiency_score DESC, total_time_ms ASC
+    LIMIT 1
+  `);
+  const fastest = db.prepare(`
+    SELECT total_time_ms, total_correct, accuracy_pct
+    FROM solo_runs
+    WHERE player_id = ?
+    ORDER BY total_time_ms ASC
+    LIMIT 1
+  `);
+  const mostAccurate = db.prepare(`
+    SELECT accuracy_pct, total_time_ms, score
+    FROM solo_runs
+    WHERE player_id = ?
+    ORDER BY accuracy_pct DESC, total_time_ms ASC
+    LIMIT 1
+  `);
+  const totals = db.prepare(`
+    SELECT COUNT(*) as total_runs, MAX(score) as best_raw_score
+    FROM solo_runs
+    WHERE player_id = ?
+  `);
+
+  const enriched = players.map(p => {
+    const e = bestEff.get(p.player_id) || {};
+    const f = fastest.get(p.player_id) || {};
+    const a = mostAccurate.get(p.player_id) || {};
+    const t = totals.get(p.player_id) || {};
+    return {
+      ...p,
+      best_efficiency:    e.efficiency_score || 0,
+      best_eff_time:      e.total_time_ms || 0,
+      best_eff_correct:   e.total_correct || 0,
+      best_eff_accuracy:  e.accuracy_pct || 0,
+      best_eff_points:    e.score || 0,
+      best_raw_time:      f.total_time_ms || 0,
+      speed_run_correct:  f.total_correct || 0,
+      speed_run_accuracy: f.accuracy_pct || 0,
+      best_accuracy:      a.accuracy_pct || 0,
+      accuracy_run_time:  a.total_time_ms || 0,
+      accuracy_run_points:a.score || 0,
+      total_runs:         t.total_runs || 0,
+      best_raw_score:     t.best_raw_score || 0
+    };
+  });
+
+  enriched.sort((x, y) => (y.best_efficiency - x.best_efficiency) || (x.best_raw_time - y.best_raw_time));
+
+  const speedCrown    = enriched.filter(p => p.best_raw_time > 0).reduce((b, p) => !b || p.best_raw_time < b.best_raw_time ? p : b, null);
+  const accuracyCrown = enriched.reduce((b, p) => !b || p.best_accuracy > b.best_accuracy ? p : b, null);
+  const overallCrown  = enriched[0];
+
+  const speedSorted = [...enriched].filter(p => p.best_raw_time > 0).sort((x, y) => x.best_raw_time - y.best_raw_time);
+  const accSorted   = [...enriched].sort((x, y) => y.best_accuracy - x.best_accuracy);
+
+  const result = enriched.map((p, idx) => ({
+    ...p,
+    overall_rank:   idx + 1,
+    speed_rank:     (speedSorted.findIndex(x => x.player_id === p.player_id) + 1) || null,
+    accuracy_rank:  accSorted.findIndex(x => x.player_id === p.player_id) + 1,
+    has_overall_crown:  !!overallCrown && p.player_id === overallCrown.player_id && p.best_efficiency > 0,
+    has_speed_crown:    !!speedCrown && p.player_id === speedCrown.player_id,
+    has_accuracy_crown: !!accuracyCrown && p.player_id === accuracyCrown.player_id && p.best_accuracy > 0
+  }));
+
+  res.json(result);
 });
 
 app.get('/api/questions', (req, res) => {
