@@ -167,21 +167,41 @@ try {
   console.warn('[migrate] solo_runs backfill skipped:', e.message);
 }
 
+const CREW = [
+  ['keshawn', "Ke'Shawn", '#FF69B4', 'K'],
+  ['sean',    'Sean',     '#2E8B57', 'S'],
+  ['amari',   'Amari',    '#FFD700', 'A'],
+  ['dart',    'Dart',     '#722F37', 'D'],
+  ['tyheim',  'Tyheim',   '#FF6B35', 'T'],
+  ['arisa',   'Arisa',    '#9B59B6', 'R'],
+  ['victoria','Victoria', '#4AC4D8', 'V']
+];
+
 function seedPlayers() {
   const count = db.prepare('SELECT COUNT(*) as c FROM players').get().c;
   if (count > 0) return;
   const ins = db.prepare(`INSERT INTO players (username, display_name, color, avatar_initial) VALUES (?, ?, ?, ?)`);
-  const crew = [
-    ['keshawn', "Ke'Shawn", '#FF69B4', 'K'],
-    ['sean', 'Sean', '#2E8B57', 'S'],
-    ['amari', 'Amari', '#FFD700', 'A'],
-    ['dart', 'Dart', '#722F37', 'D'],
-    ['tyheim', 'Tyheim', '#FF6B35', 'T'],
-    ['arisa', 'Arisa', '#9B59B6', 'R']
-  ];
-  crew.forEach(p => {
+  CREW.forEach(p => {
     const r = ins.run(...p);
     db.prepare(`INSERT INTO player_stats (player_id) VALUES (?)`).run(r.lastInsertRowid);
+  });
+}
+
+// Idempotent: ensure every CREW member exists, even on already-seeded databases.
+// Lets us add new members (like Victoria) to live DBs without resetting them.
+function ensureCrewMembers() {
+  const existsStmt = db.prepare('SELECT id FROM players WHERE username = ?');
+  const insertPlayer = db.prepare(`INSERT INTO players (username, display_name, color, avatar_initial) VALUES (?, ?, ?, ?)`);
+  const insertStats = db.prepare(`INSERT OR IGNORE INTO player_stats (player_id) VALUES (?)`);
+  CREW.forEach(p => {
+    const existing = existsStmt.get(p[0]);
+    if (existing) {
+      insertStats.run(existing.id);
+      return;
+    }
+    const r = insertPlayer.run(...p);
+    insertStats.run(r.lastInsertRowid);
+    console.log(`[migrate] added new crew member: ${p[1]}`);
   });
 }
 
@@ -459,6 +479,7 @@ function seedOpenEndedQuestions() {
 }
 
 seedPlayers();
+ensureCrewMembers();
 seedAchievements();
 seedCosmetics();
 seedCustomQuestions();

@@ -25,6 +25,7 @@ export default function Game() {
   const [shop, setShop] = useState(null);
   const [shopTab, setShopTab] = useState('powerups');
   const [shopTarget, setShopTarget] = useState(null);
+  const [confirmBuy, setConfirmBuy] = useState(null); // {item, targetId, targetName}
   const [showInventory, setShowInventory] = useState(false);
   const [deployingItem, setDeployingItem] = useState(null); // {itemId, item}
   const [itemCatalog, setItemCatalog] = useState({ sabotages: [], powerups: [] });
@@ -238,10 +239,17 @@ export default function Game() {
     const isLast = shop.lastPlaceId === socket?.id;
     const items = shopTab === 'sabotages' ? shop.sabotages : shopTab === 'powerups' ? shop.powerups : shop.brokeBoy;
     const locked = shop.shopLocked?.[socket?.id];
+    const myPts = shop.scores.find(s => s.id === socket?.id)?.points || 0;
     return (
       <div className="min-h-screen p-6">
         <div className="font-bebas text-5xl text-yellow-400 text-center pop-in mb-2">🎉 BOARD CLEARED</div>
-        <div className="max-w-md mx-auto mb-4"><Timer key={timerKey} duration={shop.duration} /></div>
+        <div className="max-w-md mx-auto mb-3"><Timer key={timerKey} duration={shop.duration} /></div>
+
+        {/* Sticky balance bar */}
+        <div className="sticky top-0 z-20 max-w-md mx-auto mb-4 px-4 py-2 rounded-lg bg-gray-900 border-2 border-yellow-500 flex items-center justify-between">
+          <span className="text-xs uppercase tracking-widest text-gray-400">YOUR BALANCE</span>
+          <span className="font-bebas text-3xl text-yellow-400">${myPts.toLocaleString()}</span>
+        </div>
 
         <div className="flex justify-center gap-2 mb-4">
           {['sabotages', 'powerups', 'brokeboy'].map(t => (
@@ -272,7 +280,6 @@ export default function Game() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 max-w-5xl mx-auto">
           {items.map(item => {
             const canBuy = !locked && (shopTab !== 'brokeboy' || isLast);
-            const myPts = shop.scores.find(s => s.id === socket?.id)?.points || 0;
             const affords = myPts >= item.cost;
             // Broke boy items still take target picker (some need it). Sabotages/powerups skip it.
             const targetPickerNeeded = shopTab === 'brokeboy' && item.needsTarget;
@@ -285,8 +292,13 @@ export default function Game() {
                   <div className="text-xs text-red-400 text-center mt-1">⚠ {item.consequence}</div>
                 )}
                 <div className="font-bebas text-2xl text-yellow-400 text-center mt-2">
-                  {item.cost === 0 ? 'FREE' : `$${item.cost}`}
+                  {item.cost === 0 ? 'FREE' : `$${item.cost.toLocaleString()}`}
                 </div>
+                {!affords && item.cost > 0 && (
+                  <div className="text-xs text-red-400 text-center mt-1">
+                    Need ${(item.cost - myPts).toLocaleString()} more
+                  </div>
+                )}
                 {targetPickerNeeded && (
                   <select className="input mt-2" value={shopTarget?.[item.id] || ''}
                     onChange={e => setShopTarget(p => ({ ...p, [item.id]: e.target.value }))}>
@@ -298,13 +310,78 @@ export default function Game() {
                 )}
                 <button
                   disabled={!canBuy || !affords || (targetPickerNeeded && !shopTarget?.[item.id])}
-                  onClick={() => socket.emit('buy', { itemId: item.id, targetId: shopTarget?.[item.id] })}
+                  onClick={() => {
+                    const targetId = shopTarget?.[item.id];
+                    const targetName = targetId ? shop.scores.find(s => s.id === targetId)?.name : null;
+                    setConfirmBuy({ item, targetId, targetName, isBrokeBoy: shopTab === 'brokeboy' });
+                  }}
                   className="btn btn-primary w-full mt-2"
                 >{shopTab === 'brokeboy' ? 'USE' : 'STOW'}</button>
               </div>
             );
           })}
         </div>
+
+        {/* Buy confirmation modal */}
+        {confirmBuy && (
+          <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4"
+               onClick={() => setConfirmBuy(null)}>
+            <div className="bg-gray-900 max-w-md w-full p-6 rounded-lg border-2 border-yellow-500"
+                 onClick={e => e.stopPropagation()}>
+              <div className="text-center">
+                <div className="text-5xl mb-2">{confirmBuy.item.icon}</div>
+                <div className="font-bebas text-2xl text-yellow-400">{confirmBuy.item.name}</div>
+                <div className="text-sm text-gray-300 mt-1 mb-4">{confirmBuy.item.desc}</div>
+              </div>
+
+              <div className="bg-gray-800 rounded p-3 mb-4 space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-gray-400">Cost:</span>
+                  <span className="font-bebas text-xl text-yellow-400">
+                    {confirmBuy.item.cost === 0 ? 'FREE' : `-$${confirmBuy.item.cost.toLocaleString()}`}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-400">Current balance:</span>
+                  <span className="font-bebas text-xl">${myPts.toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between border-t border-gray-700 pt-2">
+                  <span className="text-gray-400">Balance after:</span>
+                  <span className="font-bebas text-xl text-green-400">
+                    ${(myPts - (confirmBuy.item.cost || 0)).toLocaleString()}
+                  </span>
+                </div>
+                {confirmBuy.targetName && (
+                  <div className="flex justify-between border-t border-gray-700 pt-2">
+                    <span className="text-gray-400">Target:</span>
+                    <span className="font-bebas text-xl text-red-400">{confirmBuy.targetName}</span>
+                  </div>
+                )}
+                {!confirmBuy.isBrokeBoy && (
+                  <div className="text-xs text-gray-500 text-center pt-2 border-t border-gray-700">
+                    🎒 Goes to your inventory — deploy when ready.
+                  </div>
+                )}
+                {confirmBuy.item.consequence && (
+                  <div className="text-xs text-red-400 text-center pt-2 border-t border-gray-700">
+                    ⚠ {confirmBuy.item.consequence}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex gap-2">
+                <button onClick={() => setConfirmBuy(null)}
+                  className="btn flex-1">Cancel</button>
+                <button onClick={() => {
+                  socket.emit('buy', { itemId: confirmBuy.item.id, targetId: confirmBuy.targetId });
+                  setConfirmBuy(null);
+                }} className="btn btn-primary flex-1">
+                  Confirm
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {showHostUI && (
           <div className="fixed bottom-4 right-4 bg-yellow-900/80 p-3 rounded">
