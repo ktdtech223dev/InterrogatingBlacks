@@ -147,17 +147,17 @@ class SoloRun {
     const totalTime = Date.now() - this.startTime;
     const isPerfect = this.wrong === 0;
 
-    // Check current global record BEFORE inserting this run
+    // Check records BEFORE inserting this run so we compare against previous data only
     const prevGlobalBest = db.prepare(`SELECT MIN(total_time_ms) as best FROM solo_runs`).get()?.best;
+    const prevPersonalBest = db.prepare(`SELECT MIN(total_time_ms) as best FROM solo_runs WHERE player_id=?`).get(this.playerId)?.best;
+
     const isWorldRecord = !prevGlobalBest || totalTime < prevGlobalBest;
+    const isPB          = !prevPersonalBest || totalTime < prevPersonalBest;
 
     db.prepare(`INSERT INTO solo_runs (player_id, boards_completed, total_time_ms, total_correct, total_wrong, score) VALUES (?,1,?,?,?,?)`)
       .run(this.playerId, totalTime, this.correct, this.wrong, this.score);
 
     updatePlayerStats(this.playerId, { solo_games: 1 });
-
-    const prevBest = db.prepare(`SELECT MIN(total_time_ms) as best FROM solo_runs WHERE player_id=?`).get(this.playerId)?.best;
-    const isPB = !prevBest || totalTime < prevBest;
 
     if (isPB) {
       db.prepare(`UPDATE player_stats SET solo_best_time_ms = ? WHERE player_id = ? AND (solo_best_time_ms IS NULL OR solo_best_time_ms > ?)`)
