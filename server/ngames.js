@@ -30,7 +30,7 @@ function httpPost(path, body) {
         headers:  {
           'Content-Type':   'application/json',
           'Content-Length': Buffer.byteLength(json),
-          'User-Agent':     'InterrogatingBlacks/1.0.8',
+          'User-Agent':     'InterrogatingBlacks/1.0.9',
         },
       },
       (res) => {
