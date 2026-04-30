@@ -16,7 +16,10 @@ const TIMEOUT  = 8000;
 function httpPost(path, body) {
   return new Promise((resolve) => {
     let json;
-    try { json = JSON.stringify(body); } catch { return resolve(null); }
+    try { json = JSON.stringify(body); } catch (e) {
+      console.warn('[ngames] body serialize failed:', e.message);
+      return resolve(null);
+    }
 
     const url = new URL(SERVER + path);
     const req = https.request(
@@ -27,19 +30,33 @@ function httpPost(path, body) {
         headers:  {
           'Content-Type':   'application/json',
           'Content-Length': Buffer.byteLength(json),
-          'User-Agent':     'InterrogatingBlacks/1.0',
+          'User-Agent':     'InterrogatingBlacks/1.0.8',
         },
       },
       (res) => {
         let data = '';
         res.on('data', c => (data += c));
         res.on('end', () => {
-          try { resolve(JSON.parse(data)); } catch { resolve(null); }
+          let parsed = null;
+          try { parsed = JSON.parse(data); } catch {}
+          if (res.statusCode >= 200 && res.statusCode < 300) {
+            console.log(`[ngames] POST ${path} ok (${res.statusCode})`, parsed && JSON.stringify(parsed).slice(0, 120));
+          } else {
+            console.warn(`[ngames] POST ${path} HTTP ${res.statusCode}:`, String(data).slice(0, 200));
+          }
+          resolve(parsed);
         });
       }
     );
-    req.on('error', () => resolve(null));
-    req.setTimeout(TIMEOUT, () => { req.destroy(); resolve(null); });
+    req.on('error', (err) => {
+      console.warn(`[ngames] POST ${path} error:`, err.message);
+      resolve(null);
+    });
+    req.setTimeout(TIMEOUT, () => {
+      console.warn(`[ngames] POST ${path} TIMEOUT after ${TIMEOUT}ms`);
+      req.destroy();
+      resolve(null);
+    });
     req.write(json);
     req.end();
   });
@@ -54,7 +71,11 @@ function httpPost(path, body) {
  * @param {object} [extras]    — any extra data to store
  */
 function submitSession(profile_id, score, extras = {}) {
-  if (!profile_id) return Promise.resolve(null);
+  if (!profile_id) {
+    console.warn('[ngames] submitSession called with no profile_id');
+    return Promise.resolve(null);
+  }
+  console.log(`[ngames] submitSession profile=${profile_id} score=${score}`);
   return httpPost('/sessions', {
     profile_id,
     game_id: GAME_ID,
@@ -70,7 +91,11 @@ function submitSession(profile_id, score, extras = {}) {
  * @param {string} content — max 500 chars
  */
 function postToWall(profile_id, content) {
-  if (!profile_id) return Promise.resolve(null);
+  if (!profile_id) {
+    console.warn('[ngames] postToWall called with no profile_id');
+    return Promise.resolve(null);
+  }
+  console.log(`[ngames] postToWall profile=${profile_id} len=${String(content).length}`);
   return httpPost('/wall/post', {
     profile_id,
     game_id: GAME_ID,

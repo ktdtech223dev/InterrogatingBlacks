@@ -141,6 +141,21 @@ app.get('/api/history', (req, res) => {
   res.json(db.prepare(`SELECT * FROM game_history ORDER BY played_at DESC LIMIT 20`).all());
 });
 
+// Diagnostic: lets you verify ngames connectivity from any deployed IB server.
+//   POST /api/admin/test-ngames?profile=keshawn&score=42
+app.post('/api/admin/test-ngames', async (req, res) => {
+  try {
+    const ngames = require('./ngames');
+    const profile = req.query.profile || 'keshawn';
+    const score = parseInt(req.query.score) || 1;
+    const session = await ngames.submitSession(profile, score, { test: true, ts: Date.now() });
+    const wall = await ngames.postToWall(profile, `🧪 IB ngames diagnostic test (score=${score})`);
+    res.json({ ok: true, session, wall });
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
 app.post('/api/admin/scrape', async (req, res) => {
   try {
     const passes = Math.min(20, Math.max(1, parseInt(req.query.passes) || 1));
